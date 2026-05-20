@@ -15,6 +15,7 @@ interface AdminState {
   togglePolicy: (id: string) => void;
   updatePolicy: (id: string, patch: Partial<RoutePolicy>) => void;
   toggleProvider: (id: string) => void;
+  updateProvider: (id: string, patch: Partial<ModelProvider>) => void;
   syncRoutes: () => void;
 }
 
@@ -29,7 +30,7 @@ export const useAdminStore = create<AdminState>((set) => ({
   models: platformModels.map((model) => ({ ...model })),
   policies: routePolicies.map((policy) => ({ ...policy })),
   selectedPolicyId: "policy-brand-film",
-  selectedProviderId: "runway",
+  selectedProviderId: "seedance",
   lastSyncedAt: nowLabel(),
   selectPolicy: (selectedPolicyId) => set({ selectedPolicyId }),
   selectProvider: (selectedProviderId) => set({ selectedProviderId }),
@@ -49,6 +50,12 @@ export const useAdminStore = create<AdminState>((set) => ({
     set((state) => ({
       models: state.models.map((model) =>
         model.id === id ? { ...model, enabled: !model.enabled } : model
+      )
+    })),
+  updateProvider: (id, patch) =>
+    set((state) => ({
+      models: state.models.map((model) =>
+        model.id === id ? { ...model, ...patch } : model
       )
     })),
   syncRoutes: () => set({ lastSyncedAt: nowLabel() })
