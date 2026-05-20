@@ -106,13 +106,13 @@ const navItems: Array<{
   description: string;
   icon: LucideIcon;
 }> = [
-  { id: "overview", label: "Overview", description: "运营总览", icon: Gauge },
-  { id: "api", label: "API Access", description: "凭证与回调", icon: KeyRound },
-  { id: "routes", label: "Model Routes", description: "模型路由", icon: Router },
-  { id: "queue", label: "Task Queue", description: "异步任务", icon: Workflow },
-  { id: "schema", label: "Parameter Schema", description: "动态参数", icon: Braces },
-  { id: "billing", label: "Billing Rules", description: "计费控制", icon: WalletCards },
-  { id: "safety", label: "Safety", description: "安全审核", icon: ShieldCheck }
+  { id: "overview", label: "运营总览", description: "健康度与事件", icon: Gauge },
+  { id: "api", label: "API 接入", description: "凭证与回调", icon: KeyRound },
+  { id: "routes", label: "模型路由", description: "策略与供应商", icon: Router },
+  { id: "queue", label: "任务队列", description: "异步任务", icon: Workflow },
+  { id: "schema", label: "参数 Schema", description: "动态参数", icon: Braces },
+  { id: "billing", label: "计费规则", description: "套餐与水印", icon: WalletCards },
+  { id: "safety", label: "安全审核", description: "风控与复核", icon: ShieldCheck }
 ];
 
 const providerStatusTone: Record<ProviderStatus, Tone> = {
@@ -137,12 +137,51 @@ const queueTone: Record<QueueStatus, Tone> = {
 };
 
 const phaseLabel: Record<QueueTask["phase"], string> = {
-  brief: "Brief",
-  script: "Script",
-  storyboard: "Storyboard",
-  rendering: "Rendering",
-  export: "Export",
-  complete: "Complete"
+  brief: "需求",
+  script: "脚本",
+  storyboard: "分镜",
+  rendering: "生成",
+  export: "导出",
+  complete: "完成"
+};
+
+const providerStatusLabel: Record<ProviderStatus, string> = {
+  online: "在线",
+  degraded: "降级",
+  offline: "离线"
+};
+
+const credentialStatusLabel: Record<ApiCredential["status"], string> = {
+  valid: "有效",
+  expiring: "即将过期",
+  missing: "未配置"
+};
+
+const queueStatusLabel: Record<QueueStatus, string> = {
+  running: "运行中",
+  waiting: "等待中",
+  retrying: "重试中",
+  done: "已完成",
+  paused: "已暂停",
+  cancelled: "已取消"
+};
+
+const reviewStatusLabel: Record<ReviewItem["status"], string> = {
+  pending: "待复核",
+  approved: "已通过",
+  blocked: "已阻断"
+};
+
+const severityLabel: Record<ReviewItem["severity"], string> = {
+  low: "低风险",
+  medium: "中风险",
+  high: "高风险"
+};
+
+const overageActionLabel: Record<BillingRule["overageAction"], string> = {
+  allow: "允许超额",
+  throttle: "限速",
+  block: "阻断"
 };
 
 const dotClass: Record<Tone, string> = {
@@ -157,16 +196,32 @@ const providerLabel: Record<string, string> = {
   seedance: "Seedance 字节",
   hailuo: "Hailuo 海螺",
   kling: "Kling 可灵",
-  "script-llm": "Script LLM",
-  "merge-renderer": "Merge Renderer",
-  "safety-check": "Safety Review"
+  "script-llm": "脚本 LLM",
+  "merge-renderer": "视频合成器",
+  "safety-check": "安全审核"
+};
+
+const credentialLabelMap: Record<string, string> = {
+  "Production Gateway": "生产网关",
+  "Creator Pool": "创作者池",
+  "CN Region": "中国区",
+  "New Gateway": "新网关"
+};
+
+const ownerLabelMap: Record<string, string> = {
+  Platform: "平台团队",
+  Growth: "增长团队",
+  Sales: "销售团队",
+  Lifecycle: "生命周期团队",
+  "CN Ops": "国内运营",
+  Ops: "运营团队"
 };
 
 const initialBillingRules: BillingRule[] = [
   {
     id: "creator-pro",
-    name: "Creator Pro",
-    owner: "Growth",
+    name: "创作者专业版",
+    owner: "增长团队",
     monthlyBudget: 2400,
     costCapPerMinute: 2.4,
     watermarkLocked: false,
@@ -175,8 +230,8 @@ const initialBillingRules: BillingRule[] = [
   },
   {
     id: "agency",
-    name: "Agency Seat",
-    owner: "Sales",
+    name: "机构席位",
+    owner: "销售团队",
     monthlyBudget: 12800,
     costCapPerMinute: 3.2,
     watermarkLocked: false,
@@ -185,8 +240,8 @@ const initialBillingRules: BillingRule[] = [
   },
   {
     id: "free-trial",
-    name: "Free Trial",
-    owner: "Lifecycle",
+    name: "免费试用",
+    owner: "生命周期团队",
     monthlyBudget: 180,
     costCapPerMinute: 1.1,
     watermarkLocked: true,
@@ -198,28 +253,28 @@ const initialBillingRules: BillingRule[] = [
 const initialSafetyRules: SafetyRule[] = [
   {
     id: "nsfw",
-    name: "NSFW precheck",
+    name: "内容安全预审",
     description: "脚本、首帧图和风格参考图提交前预审。",
     enabled: true,
     threshold: 82
   },
   {
     id: "brand-safe",
-    name: "Brand safe zone",
+    name: "品牌安全区",
     description: "品牌名、Logo 和商业素材使用边界检测。",
     enabled: true,
     threshold: 76
   },
   {
     id: "sensitive-topic",
-    name: "Sensitive topic gate",
+    name: "敏感议题门禁",
     description: "高风险政治、医疗和金融内容进入人工复核。",
     enabled: true,
     threshold: 68
   },
   {
     id: "face-consent",
-    name: "Face consent check",
+    name: "肖像授权检查",
     description: "真人肖像、情绪视频与配音合成授权检查。",
     enabled: false,
     threshold: 60
@@ -229,21 +284,21 @@ const initialSafetyRules: SafetyRule[] = [
 const initialReviewItems: ReviewItem[] = [
   {
     id: "review_1928",
-    title: "Commerce Batch / Product claim",
+    title: "电商批量任务 / 商品功效声明",
     reason: "疑似夸大功效，需要运营确认文案。",
     severity: "medium",
     status: "pending"
   },
   {
     id: "review_1934",
-    title: "Agency / Face reference",
+    title: "机构项目 / 真人参考图",
     reason: "上传了真人参考图，缺少授权标记。",
     severity: "high",
     status: "pending"
   },
   {
     id: "review_1938",
-    title: "Creator Pro / Music usage",
+    title: "创作者专业版 / 音乐使用",
     reason: "BGM 来源未标明版权类型。",
     severity: "low",
     status: "approved"
@@ -278,7 +333,11 @@ function numberValue(value: string, fallback = 0) {
 export default function AdminPage() {
   const [activeSection, setActiveSection] = useState<AdminSection>("overview");
   const [apiCredentials, setApiCredentials] = useState<ApiCredential[]>(
-    seedCredentials.map((credential) => ({ ...credential }))
+    seedCredentials.map((credential) => ({
+      ...credential,
+      label: credentialLabelMap[credential.label] ?? credential.label,
+      owner: ownerLabelMap[credential.owner] ?? credential.owner
+    }))
   );
   const [selectedCredentialId, setSelectedCredentialId] = useState(seedCredentials[0]?.id ?? "");
   const [credentialSecret, setCredentialSecret] = useState("");
@@ -297,8 +356,8 @@ export default function AdminPage() {
     "deepfake without consent\nmedical cure guarantee\ninvestment return promise"
   );
   const [routeSimulator, setRouteSimulator] = useState<RouteSimulator>({
-    intent: "30s product launch film",
-    platform: "Douyin",
+    intent: "30 秒新品发布短片",
+    platform: "抖音",
     maxCost: 2.4
   });
   const [events, setEvents] = useState<AdminEvent[]>([
@@ -406,11 +465,11 @@ export default function AdminPage() {
   const addCredential = () => {
     const credential: ApiCredential = {
       id: `cred-custom-${Date.now()}`,
-      provider: "Custom Provider",
-      label: "New Gateway",
+      provider: "自定义供应商",
+      label: "新网关",
       status: "missing",
-      lastChecked: "never",
-      owner: "Ops"
+      lastChecked: "未检查",
+      owner: "运营团队"
     };
     setApiCredentials((items) => [credential, ...items]);
     setSelectedCredentialId(credential.id);
@@ -489,8 +548,8 @@ export default function AdminPage() {
   const addBillingRule = () => {
     const rule: BillingRule = {
       id: `plan-${Date.now()}`,
-      name: "New Plan",
-      owner: "Ops",
+      name: "新套餐",
+      owner: "运营团队",
       monthlyBudget: 1000,
       costCapPerMinute: 1.8,
       watermarkLocked: true,
@@ -499,7 +558,7 @@ export default function AdminPage() {
     };
     setBillingRules((items) => [rule, ...items]);
     setSelectedBillingId(rule.id);
-    pushEvent("billing.plan.created: New Plan", "purple");
+    pushEvent("billing.plan.created: 新套餐", "purple");
   };
 
   const updateSafetyRule = (id: string, patch: Partial<SafetyRule>) => {
@@ -514,7 +573,7 @@ export default function AdminPage() {
   const addReviewItem = () => {
     const item: ReviewItem = {
       id: `review_${Date.now().toString().slice(-5)}`,
-      title: "Manual sample / Pending check",
+      title: "人工抽检 / 待复核",
       reason: "运营手动加入的抽检任务。",
       severity: "medium",
       status: "pending"
@@ -532,12 +591,12 @@ export default function AdminPage() {
               <CloudCog className="h-4 w-4" />
             </div>
             <div>
-              <div className="text-sm font-semibold">FrameForge Admin</div>
-              <div className="text-xs text-muted-foreground">API routing and model operations</div>
+              <div className="text-sm font-semibold">FrameForge 管理后台</div>
+              <div className="text-xs text-muted-foreground">API 接入、模型路由与运营控制</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Badge tone="green">Synced {lastSyncedAt}</Badge>
+            <Badge tone="green">已同步 {lastSyncedAt}</Badge>
             <Button variant="outline" size="sm" onClick={handleSyncRoutes}>
               <RefreshCcw className="h-3.5 w-3.5" />
               同步配置
@@ -545,7 +604,7 @@ export default function AdminPage() {
             <Link href="/studio">
               <Button variant="secondary" size="sm">
                 <ArrowLeft className="h-3.5 w-3.5" />
-                Studio
+                用户端
               </Button>
             </Link>
           </div>
@@ -558,12 +617,12 @@ export default function AdminPage() {
             <div className="rounded-lg border border-border bg-background p-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                  Workspace
+                  工作区
                 </span>
-                <Badge tone="green">prod</Badge>
+                <Badge tone="green">生产</Badge>
               </div>
-              <div className="mt-2 text-sm font-semibold">Creator Platform Ops</div>
-              <div className="mt-1 text-xs text-muted-foreground">REST API + WebSocket workers</div>
+              <div className="mt-2 text-sm font-semibold">创作者平台运营</div>
+              <div className="mt-1 text-xs text-muted-foreground">REST API + WebSocket 任务</div>
             </div>
 
             <nav className="mt-6 space-y-1">
@@ -593,13 +652,13 @@ export default function AdminPage() {
 
             <div className="mt-auto rounded-lg border border-border p-3">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-medium text-muted-foreground">SLA Health</span>
+                <span className="font-medium text-muted-foreground">SLA 健康度</span>
                 <span className="font-semibold">99.92%</span>
               </div>
               <Progress value={92} className="mt-3" />
               <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
                 <Activity className="h-3.5 w-3.5 text-primary" />
-                24h routing errors: 18
+                24 小时路由错误：18
               </div>
             </div>
           </div>
@@ -610,7 +669,7 @@ export default function AdminPage() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                  Admin Console
+                  管理后台
                 </div>
                 <h1 className="mt-1 text-2xl font-semibold">
                   {navItems.find((item) => item.id === activeSection)?.label}
@@ -774,28 +833,28 @@ function KpiGrid({
 }) {
   const metrics: Array<{ label: string; value: string; detail: string; icon: LucideIcon; tone: Tone }> = [
     {
-      label: "Enabled Models",
+      label: "启用模型",
       value: `${enabledModels}/${totalModels}`,
       detail: "可用供应商",
       icon: ServerCog,
       tone: "green"
     },
     {
-      label: "Avg Latency",
+      label: "平均延迟",
       value: `${(avgLatency / 1000).toFixed(1)}s`,
       detail: "视频模型平均",
       icon: Gauge,
       tone: "purple"
     },
     {
-      label: "Quota Used",
+      label: "额度使用",
       value: `${avgQuota}%`,
       detail: "本月平均消耗",
       icon: Database,
       tone: "amber"
     },
     {
-      label: "Active Jobs",
+      label: "活跃任务",
       value: String(activeJobs),
       detail: "运行或重试中",
       icon: Workflow,
@@ -864,7 +923,7 @@ function OverviewSection({
             <CardTitle>模型供应商健康</CardTitle>
             <div className="mt-1 text-xs text-muted-foreground">启停、容量、延迟和成本参数可直接修改。</div>
           </div>
-          <Badge tone={failedRisk > 0 ? "amber" : "green"}>{failedRisk > 0 ? "attention" : "all healthy"}</Badge>
+          <Badge tone={failedRisk > 0 ? "amber" : "green"}>{failedRisk > 0 ? "需要关注" : "全部健康"}</Badge>
         </CardHeader>
         <CardContent>
           <div className="grid gap-3 md:grid-cols-3">
@@ -879,7 +938,7 @@ function OverviewSection({
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-semibold">{providerLabel[model.id] ?? model.name}</span>
-                  <Badge tone={providerStatusTone[model.status]}>{model.status}</Badge>
+                  <Badge tone={providerStatusTone[model.status]}>{providerStatusLabel[model.status]}</Badge>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1">
                   {model.abilityTags?.map((tag) => (
@@ -913,25 +972,25 @@ function OverviewSection({
                 }}
               >
                 {selectedProvider.enabled ? <ToggleRight className="h-4 w-4 text-primary" /> : <ToggleLeft className="h-4 w-4" />}
-                {selectedProvider.enabled ? "Enabled" : "Disabled"}
+                {selectedProvider.enabled ? "已启用" : "已停用"}
               </Button>
             </div>
 
             <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <div>
-                <Label>Status</Label>
+                <Label>状态</Label>
                 <Select
                   className="mt-2"
                   value={selectedProvider.status}
                   onChange={(event) => updateProvider(selectedProvider.id, { status: event.target.value as ProviderStatus })}
                 >
-                  <option value="online">online</option>
-                  <option value="degraded">degraded</option>
-                  <option value="offline">offline</option>
+                  <option value="online">在线</option>
+                  <option value="degraded">降级</option>
+                  <option value="offline">离线</option>
                 </Select>
               </div>
               <div>
-                <Label>Concurrency</Label>
+                <Label>并发数</Label>
                 <Input
                   className="mt-2"
                   type="number"
@@ -940,7 +999,7 @@ function OverviewSection({
                 />
               </div>
               <div>
-                <Label>Latency ms</Label>
+                <Label>延迟 ms</Label>
                 <Input
                   className="mt-2"
                   type="number"
@@ -949,7 +1008,7 @@ function OverviewSection({
                 />
               </div>
               <div>
-                <Label>Cost / min</Label>
+                <Label>成本 / 分钟</Label>
                 <Input
                   className="mt-2"
                   type="number"
@@ -987,9 +1046,9 @@ function OverviewSection({
             <CardTitle>路由与队列概况</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-            <MetricPanel label="Enabled Routes" value={enabledPolicies} detail="active policy count" />
-            <MetricPanel label="Queued Jobs" value={taskList.filter((task) => task.status === "waiting").length} detail="waiting workers" />
-            <MetricPanel label="Retry Rate" value="4.8%" detail="last 24 hours" />
+            <MetricPanel label="启用路由" value={enabledPolicies} detail="正在生效的策略" />
+            <MetricPanel label="排队任务" value={taskList.filter((task) => task.status === "waiting").length} detail="等待 Worker 执行" />
+            <MetricPanel label="重试率" value="4.8%" detail="最近 24 小时" />
           </CardContent>
         </Card>
       </div>
@@ -1038,7 +1097,7 @@ function ApiAccessSection({
         <CardHeader className="flex flex-row items-center justify-between gap-3">
           <div>
             <CardTitle>API 凭证池</CardTitle>
-            <div className="mt-1 text-xs text-muted-foreground">管理厂商密钥状态、Owner 和健康检查。</div>
+            <div className="mt-1 text-xs text-muted-foreground">管理厂商密钥状态、负责人和健康检查。</div>
           </div>
           <Button size="sm" variant="outline" onClick={addCredential}>
             <Plus className="h-3.5 w-3.5" />
@@ -1062,11 +1121,11 @@ function ApiAccessSection({
                     {credential.label} / {credential.owner}
                   </div>
                 </div>
-                <Badge tone={credentialTone[credential.status]}>{credential.status}</Badge>
+                <Badge tone={credentialTone[credential.status]}>{credentialStatusLabel[credential.status]}</Badge>
               </div>
               <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
                 <LockKeyhole className="h-3.5 w-3.5" />
-                last checked {credential.lastChecked}
+                最近检查：{credential.lastChecked}
               </div>
             </button>
           ))}
@@ -1080,7 +1139,7 @@ function ApiAccessSection({
             <div className="mt-1 text-xs text-muted-foreground">测试连接、轮换密钥、设置回调地址。</div>
           </div>
           <Badge tone={selectedCredential ? credentialTone[selectedCredential.status] : "neutral"}>
-            {selectedCredential?.status ?? "empty"}
+            {selectedCredential ? credentialStatusLabel[selectedCredential.status] : "未选择"}
           </Badge>
         </CardHeader>
         <CardContent>
@@ -1088,7 +1147,7 @@ function ApiAccessSection({
             <div className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
-                  <Label>Provider</Label>
+                  <Label>厂商</Label>
                   <Input
                     className="mt-2"
                     value={selectedCredential.provider}
@@ -1096,7 +1155,7 @@ function ApiAccessSection({
                   />
                 </div>
                 <div>
-                  <Label>Label</Label>
+                  <Label>凭证名称</Label>
                   <Input
                     className="mt-2"
                     value={selectedCredential.label}
@@ -1104,7 +1163,7 @@ function ApiAccessSection({
                   />
                 </div>
                 <div>
-                  <Label>Owner</Label>
+                  <Label>负责人</Label>
                   <Input
                     className="mt-2"
                     value={selectedCredential.owner}
@@ -1112,7 +1171,7 @@ function ApiAccessSection({
                   />
                 </div>
                 <div>
-                  <Label>Status</Label>
+                  <Label>状态</Label>
                   <Select
                     className="mt-2"
                     value={selectedCredential.status}
@@ -1120,20 +1179,20 @@ function ApiAccessSection({
                       updateCredential(selectedCredential.id, { status: event.target.value as ApiCredential["status"] })
                     }
                   >
-                    <option value="valid">valid</option>
-                    <option value="expiring">expiring</option>
-                    <option value="missing">missing</option>
+                    <option value="valid">有效</option>
+                    <option value="expiring">即将过期</option>
+                    <option value="missing">未配置</option>
                   </Select>
                 </div>
                 <div>
-                  <Label>Secret Mode</Label>
+                  <Label>密钥模式</Label>
                   <Select className="mt-2" value={credentialMode} onChange={(event) => setCredentialMode(event.target.value as "vault" | "plain")}>
-                    <option value="vault">Vault reference</option>
-                    <option value="plain">Plain secret</option>
+                    <option value="vault">Vault 引用</option>
+                    <option value="plain">明文密钥</option>
                   </Select>
                 </div>
                 <div>
-                  <Label>Secret / Vault Ref</Label>
+                  <Label>密钥 / Vault 引用</Label>
                   <Input
                     className="mt-2"
                     type="password"
@@ -1145,19 +1204,19 @@ function ApiAccessSection({
               </div>
 
               <div>
-                <Label>Webhook Callback</Label>
+                <Label>Webhook 回调地址</Label>
                 <Input className="mt-2" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} />
               </div>
 
               <div className="rounded-lg border border-border bg-background p-4">
                 <div className="flex items-center gap-2 text-sm font-semibold">
                   <Network className="h-4 w-4 text-primary" />
-                  Health Probe
+                  健康探测
                 </div>
                 <div className="mt-3 grid gap-3 md:grid-cols-3">
-                  <MetricPanel label="Timeout" value="30s" detail="REST request" />
-                  <MetricPanel label="Callback" value="200" detail="last mock ping" />
-                  <MetricPanel label="Rate Limit" value="860/min" detail="tenant pool" />
+                  <MetricPanel label="超时" value="30s" detail="REST 请求" />
+                  <MetricPanel label="回调状态" value="200" detail="最近一次模拟探测" />
+                  <MetricPanel label="速率限制" value="860/min" detail="租户池" />
                 </div>
               </div>
 
@@ -1250,13 +1309,13 @@ function RoutesSection({
                   <div className="text-sm font-semibold">{policy.name}</div>
                   <div className="mt-1 text-xs text-muted-foreground">{policy.intent}</div>
                 </div>
-                <Badge tone={policy.enabled ? "green" : "neutral"}>{policy.enabled ? "enabled" : "off"}</Badge>
+                <Badge tone={policy.enabled ? "green" : "neutral"}>{policy.enabled ? "已启用" : "已关闭"}</Badge>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                <span>Primary: {modelName(models, policy.primaryModelId)}</span>
-                <span>Fallback: {modelName(models, policy.fallbackModelId)}</span>
-                <span>Quality {policy.qualityWeight}</span>
-                <span>Cap ${policy.costCap}/min</span>
+                <span>主模型：{modelName(models, policy.primaryModelId)}</span>
+                <span>回退模型：{modelName(models, policy.fallbackModelId)}</span>
+                <span>质量权重 {policy.qualityWeight}</span>
+                <span>成本上限 ${policy.costCap}/分钟</span>
               </div>
             </button>
           ))}
@@ -1279,12 +1338,12 @@ function RoutesSection({
               }}
             >
               {selectedPolicy.enabled ? <ToggleRight className="h-4 w-4 text-primary" /> : <ToggleLeft className="h-4 w-4" />}
-              {selectedPolicy.enabled ? "on" : "off"}
+              {selectedPolicy.enabled ? "开启" : "关闭"}
             </Button>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <Label>Intent</Label>
+              <Label>适用意图</Label>
               <Input
                 className="mt-2"
                 value={selectedPolicy.intent}
@@ -1293,7 +1352,7 @@ function RoutesSection({
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <Label>Primary Model</Label>
+                <Label>主模型</Label>
                 <Select
                   className="mt-2"
                   value={selectedPolicy.primaryModelId}
@@ -1307,7 +1366,7 @@ function RoutesSection({
                 </Select>
               </div>
               <div>
-                <Label>Fallback Model</Label>
+                <Label>回退模型</Label>
                 <Select
                   className="mt-2"
                   value={selectedPolicy.fallbackModelId}
@@ -1321,7 +1380,7 @@ function RoutesSection({
                 </Select>
               </div>
               <div>
-                <Label>Max Latency ms</Label>
+                <Label>最大延迟 ms</Label>
                 <Input
                   className="mt-2"
                   type="number"
@@ -1330,7 +1389,7 @@ function RoutesSection({
                 />
               </div>
               <div>
-                <Label>Cost Cap / min</Label>
+                <Label>成本上限 / 分钟</Label>
                 <Input
                   className="mt-2"
                   type="number"
@@ -1342,7 +1401,7 @@ function RoutesSection({
             </div>
             <div>
               <div className="flex items-center justify-between">
-                <Label>Quality Weight</Label>
+                <Label>质量权重</Label>
                 <span className="text-xs font-semibold">{selectedPolicy.qualityWeight}</span>
               </div>
               <input
@@ -1369,7 +1428,7 @@ function RoutesSection({
           <CardContent className="space-y-4">
             <div className="grid gap-4 md:grid-cols-[1fr_140px_140px]">
               <div>
-                <Label>Intent</Label>
+                <Label>创作意图</Label>
                 <Input
                   className="mt-2"
                   value={routeSimulator.intent}
@@ -1377,20 +1436,20 @@ function RoutesSection({
                 />
               </div>
               <div>
-                <Label>Platform</Label>
+                <Label>目标平台</Label>
                 <Select
                   className="mt-2"
                   value={routeSimulator.platform}
                   onChange={(event) => setRouteSimulator((state) => ({ ...state, platform: event.target.value }))}
                 >
-                  <option value="Douyin">Douyin</option>
-                  <option value="Xiaohongshu">Xiaohongshu</option>
+                  <option value="抖音">抖音</option>
+                  <option value="小红书">小红书</option>
                   <option value="YouTube Shorts">YouTube Shorts</option>
-                  <option value="Video Account">Video Account</option>
+                  <option value="视频号">视频号</option>
                 </Select>
               </div>
               <div>
-                <Label>Max Cost</Label>
+                <Label>最高成本</Label>
                 <Input
                   className="mt-2"
                   type="number"
@@ -1406,7 +1465,7 @@ function RoutesSection({
               <div className="rounded-lg border border-border bg-foreground p-4 text-white">
                 <div className="flex items-center gap-2 text-sm font-semibold">
                   <SlidersHorizontal className="h-4 w-4" />
-                  Matched Policy: {routeResult.policy.name}
+                  命中策略：{routeResult.policy.name}
                 </div>
                 <pre className="mt-3 overflow-auto text-xs leading-5 text-white/85">
 {JSON.stringify(
@@ -1443,10 +1502,10 @@ function RoutesSection({
           </CardHeader>
           <CardContent>
             <div className="grid gap-4 md:grid-cols-4">
-              <MetricPanel label="Status" value={selectedProvider.status} detail={selectedProvider.region} />
-              <MetricPanel label="Concurrency" value={selectedProvider.concurrency} detail="parallel jobs" />
-              <MetricPanel label="Quota" value={`${selectedProvider.quotaUsed}%`} detail="monthly used" />
-              <MetricPanel label="Cost" value={`$${selectedProvider.costPerMinute}`} detail="per minute" />
+              <MetricPanel label="状态" value={providerStatusLabel[selectedProvider.status]} detail={selectedProvider.region} />
+              <MetricPanel label="并发" value={selectedProvider.concurrency} detail="并行任务" />
+              <MetricPanel label="额度" value={`${selectedProvider.quotaUsed}%`} detail="本月已用" />
+              <MetricPanel label="成本" value={`$${selectedProvider.costPerMinute}`} detail="每分钟" />
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
               <Button
@@ -1457,7 +1516,7 @@ function RoutesSection({
                 }}
               >
                 {selectedProvider.enabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                {selectedProvider.enabled ? "Pause provider" : "Resume provider"}
+                {selectedProvider.enabled ? "暂停供应商" : "恢复供应商"}
               </Button>
               <Button
                 variant="outline"
@@ -1509,9 +1568,9 @@ function TaskQueueSection({
   const createTask = () => {
     const task: AdminQueueTask = {
       id: `task_${Date.now().toString().slice(-5)}`,
-      workspace: "Studio / Manual Dispatch",
+      workspace: "Studio / 手动派发",
       phase: "rendering",
-      route: "ops-manual-route",
+      route: "运营手动路由",
       status: "waiting",
       progress: 0,
       eta: "04:00"
@@ -1527,7 +1586,7 @@ function TaskQueueSection({
           <CardTitle>任务队列</CardTitle>
           <div className="mt-1 text-xs text-muted-foreground">异步脚本、分镜、视频生成和导出任务。</div>
         </div>
-        <Badge tone="purple">WebSocket live</Badge>
+        <Badge tone="purple">WebSocket 实时</Badge>
       </CardHeader>
       <CardContent>
         <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_180px_auto_auto_auto]">
@@ -1537,41 +1596,41 @@ function TaskQueueSection({
               className="pl-9"
               value={queueSearch}
               onChange={(event) => setQueueSearch(event.target.value)}
-              placeholder="Search task, workspace, route"
+              placeholder="搜索任务、工作区或路由"
             />
           </div>
           <Select value={queueFilter} onChange={(event) => setQueueFilter(event.target.value as QueueStatus | "all")}>
-            <option value="all">All status</option>
-            <option value="running">running</option>
-            <option value="waiting">waiting</option>
-            <option value="retrying">retrying</option>
-            <option value="paused">paused</option>
-            <option value="done">done</option>
-            <option value="cancelled">cancelled</option>
+            <option value="all">全部状态</option>
+            <option value="running">运行中</option>
+            <option value="waiting">等待中</option>
+            <option value="retrying">重试中</option>
+            <option value="paused">已暂停</option>
+            <option value="done">已完成</option>
+            <option value="cancelled">已取消</option>
           </Select>
           <Button variant="outline" onClick={createTask}>
             <Plus className="h-4 w-4" />
-            Add task
+            新增任务
           </Button>
           <Button variant="outline" onClick={advanceQueue}>
             <Activity className="h-4 w-4" />
-            Tick
+            推进进度
           </Button>
           <Button variant="outline" onClick={clearDoneTasks}>
             <Trash2 className="h-4 w-4" />
-            Archive
+            归档
           </Button>
         </div>
 
         <div className="overflow-x-auto rounded-lg border border-border bg-background">
           <div className="min-w-[920px]">
             <div className="grid grid-cols-[120px_1.3fr_112px_104px_1fr_220px] border-b border-border bg-muted px-3 py-2 text-xs font-medium text-muted-foreground">
-              <span>Task</span>
-              <span>Workspace</span>
-              <span>Phase</span>
-              <span>Status</span>
-              <span>Progress</span>
-              <span className="text-right">Actions</span>
+              <span>任务</span>
+              <span>工作区</span>
+              <span>阶段</span>
+              <span>状态</span>
+              <span>进度</span>
+              <span className="text-right">操作</span>
             </div>
             {filteredTasks.map((task) => (
               <div
@@ -1585,27 +1644,27 @@ function TaskQueueSection({
                 </span>
                 <span>{phaseLabel[task.phase]}</span>
                 <span>
-                  <Badge tone={queueTone[task.status]}>{task.status}</Badge>
+                  <Badge tone={queueTone[task.status]}>{queueStatusLabel[task.status]}</Badge>
                 </span>
                 <span>
                   <Progress value={task.progress} />
                   <span className="mt-1 block text-xs text-muted-foreground">
-                    {task.progress}% / ETA {task.eta}
+                    {task.progress}% / 预计剩余 {task.eta}
                   </span>
                 </span>
                 <span className="flex justify-end gap-2">
                   <Button size="sm" variant="outline" onClick={() => updateTaskStatus(task.id, "retrying")}>
-                    Retry
+                    重试
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => updateTaskStatus(task.id, task.status === "paused" ? "running" : "paused")}
                   >
-                    {task.status === "paused" ? "Resume" : "Pause"}
+                    {task.status === "paused" ? "恢复" : "暂停"}
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => updateTaskStatus(task.id, "cancelled")}>
-                    Cancel
+                    取消
                   </Button>
                 </span>
               </div>
@@ -1614,10 +1673,10 @@ function TaskQueueSection({
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-4">
-          <MetricPanel label="Running" value={taskList.filter((task) => task.status === "running").length} detail="workers occupied" />
-          <MetricPanel label="Retrying" value={taskList.filter((task) => task.status === "retrying").length} detail="fallback enabled" />
-          <MetricPanel label="Waiting" value={taskList.filter((task) => task.status === "waiting").length} detail="ready to dispatch" />
-          <MetricPanel label="Completed" value={taskList.filter((task) => task.status === "done").length} detail="ready for delivery" />
+          <MetricPanel label="运行中" value={taskList.filter((task) => task.status === "running").length} detail="Worker 占用" />
+          <MetricPanel label="重试中" value={taskList.filter((task) => task.status === "retrying").length} detail="已启用回退" />
+          <MetricPanel label="等待中" value={taskList.filter((task) => task.status === "waiting").length} detail="等待派发" />
+          <MetricPanel label="已完成" value={taskList.filter((task) => task.status === "done").length} detail="可交付" />
         </div>
       </CardContent>
     </Card>
@@ -1660,7 +1719,7 @@ function SchemaSection({
             JSON Schema Draft-07 + ui:* 扩展，驱动 Studio 参数表单与厂商 API 字段映射。
           </div>
         </div>
-        <Badge tone={selectedSchemaError ? "red" : "green"}>{selectedSchemaError ? "schema error" : "published to Studio"}</Badge>
+        <Badge tone={selectedSchemaError ? "red" : "green"}>{selectedSchemaError ? "Schema 异常" : "已发布到 Studio"}</Badge>
       </CardHeader>
       <CardContent>
         <div className="mb-4 flex flex-wrap gap-2">
@@ -1693,7 +1752,7 @@ function SchemaSection({
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" onClick={() => copyToClipboard(selectedSchemaDraft)}>
                   <Copy className="h-3.5 w-3.5" />
-                  Copy
+                  复制
                 </Button>
                 <Button
                   size="sm"
@@ -1704,7 +1763,7 @@ function SchemaSection({
                   }}
                 >
                   <RefreshCcw className="h-3.5 w-3.5" />
-                  Reset
+                  重置
                 </Button>
               </div>
             </div>
@@ -1730,7 +1789,7 @@ function SchemaSection({
                   <Braces className="h-4 w-4 text-primary" />
                   字段映射
                 </div>
-                <Badge tone="neutral">{schemaFields.length} fields</Badge>
+                <Badge tone="neutral">{schemaFields.length} 个字段</Badge>
               </div>
               <div className="mt-3 space-y-2">
                 {schemaFields.map(([fieldKey, property]) => (
@@ -1765,7 +1824,7 @@ function SchemaSection({
             </div>
 
             <div className="rounded-lg border border-border bg-foreground p-4 text-white">
-              <div className="text-xs font-semibold uppercase tracking-[0.08em] text-white/60">Uniform Protocol</div>
+              <div className="text-xs font-semibold uppercase tracking-[0.08em] text-white/60">统一请求协议</div>
               <pre className="mt-3 overflow-auto text-xs leading-5 text-white/86">
 {JSON.stringify(
   {
@@ -1842,11 +1901,11 @@ function BillingSection({
                 <div>
                   <div className="text-sm font-semibold">{rule.name}</div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    Owner {rule.owner} / ${rule.monthlyBudget}/mo
+                    负责人 {rule.owner} / ${rule.monthlyBudget}/月
                   </div>
                 </div>
                 <Badge tone={rule.watermarkLocked ? "amber" : "green"}>
-                  {rule.watermarkLocked ? "watermark locked" : "paid export"}
+                  {rule.watermarkLocked ? "水印锁定" : "付费无水印"}
                 </Badge>
               </div>
               <Progress value={rule.usagePercent} className="mt-3" />
@@ -1863,7 +1922,7 @@ function BillingSection({
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <Label>Plan Name</Label>
+              <Label>套餐名称</Label>
               <Input
                 className="mt-2"
                 value={selectedBillingRule.name}
@@ -1871,7 +1930,7 @@ function BillingSection({
               />
             </div>
             <div>
-              <Label>Owner</Label>
+              <Label>负责人</Label>
               <Input
                 className="mt-2"
                 value={selectedBillingRule.owner}
@@ -1879,7 +1938,7 @@ function BillingSection({
               />
             </div>
             <div>
-              <Label>Monthly Budget</Label>
+              <Label>月度预算</Label>
               <Input
                 className="mt-2"
                 type="number"
@@ -1888,7 +1947,7 @@ function BillingSection({
               />
             </div>
             <div>
-              <Label>Cost Cap / min</Label>
+              <Label>分钟成本上限</Label>
               <Input
                 className="mt-2"
                 type="number"
@@ -1898,7 +1957,7 @@ function BillingSection({
               />
             </div>
             <div>
-              <Label>Overage Action</Label>
+              <Label>超额策略</Label>
               <Select
                 className="mt-2"
                 value={selectedBillingRule.overageAction}
@@ -1906,13 +1965,13 @@ function BillingSection({
                   updateBillingRule(selectedBillingRule.id, { overageAction: event.target.value as BillingRule["overageAction"] })
                 }
               >
-                <option value="allow">allow</option>
-                <option value="throttle">throttle</option>
-                <option value="block">block</option>
+                <option value="allow">允许超额</option>
+                <option value="throttle">限速</option>
+                <option value="block">阻断</option>
               </Select>
             </div>
             <div>
-              <Label>Usage</Label>
+              <Label>使用率</Label>
               <Input
                 className="mt-2"
                 type="number"
@@ -1931,14 +1990,14 @@ function BillingSection({
             )}
             onClick={() => updateBillingRule(selectedBillingRule.id, { watermarkLocked: !selectedBillingRule.watermarkLocked })}
           >
-            <span>Watermark paid control</span>
-            <span>{selectedBillingRule.watermarkLocked ? "Locked" : "Unlocked"}</span>
+            <span>水印付费控制</span>
+            <span>{selectedBillingRule.watermarkLocked ? "已锁定" : "已解锁"}</span>
           </button>
 
           <div className="grid gap-3 sm:grid-cols-3">
-            <MetricPanel label="Projected spend" value={`$${estimatedMonthlyCost}`} detail="this month" />
-            <MetricPanel label="Export gate" value={selectedBillingRule.watermarkLocked ? "Watermark" : "Clean"} detail="paid control point" />
-            <MetricPanel label="Overage" value={selectedBillingRule.overageAction} detail="when budget exceeds" />
+            <MetricPanel label="预计消耗" value={`$${estimatedMonthlyCost}`} detail="本月" />
+            <MetricPanel label="导出闸口" value={selectedBillingRule.watermarkLocked ? "带水印" : "无水印"} detail="付费控制点" />
+            <MetricPanel label="超额策略" value={overageActionLabel[selectedBillingRule.overageAction]} detail="预算超限时" />
           </div>
           <Button onClick={() => pushEvent(`billing.saved: ${selectedBillingRule.id}`, "green")}>
             <Save className="h-4 w-4" />
@@ -1986,7 +2045,7 @@ function SafetySection({
                 </div>
                 <Button size="sm" variant="outline" onClick={() => updateSafetyRule(rule.id, { enabled: !rule.enabled })}>
                   {rule.enabled ? <ToggleRight className="h-4 w-4 text-primary" /> : <ToggleLeft className="h-4 w-4" />}
-                  {rule.enabled ? "on" : "off"}
+                  {rule.enabled ? "开启" : "关闭"}
                 </Button>
               </div>
               <div className="mt-4 flex items-center gap-3">
@@ -2003,7 +2062,7 @@ function SafetySection({
             </div>
           ))}
           <div>
-            <Label>Blocked Terms</Label>
+            <Label>阻断词库</Label>
             <Textarea className="mt-2 min-h-32 font-mono text-xs" value={blockedTerms} onChange={(event) => setBlockedTerms(event.target.value)} />
           </div>
           <Button onClick={() => pushEvent("safety.rules.published: moderation config updated", "green")}>
@@ -2033,28 +2092,28 @@ function SafetySection({
                   <div className="mt-1 text-xs leading-5 text-muted-foreground">{item.reason}</div>
                 </div>
                 <Badge tone={item.severity === "high" ? "red" : item.severity === "medium" ? "amber" : "neutral"}>
-                  {item.severity}
+                  {severityLabel[item.severity]}
                 </Badge>
               </div>
               <div className="mt-3 flex items-center justify-between gap-3">
                 <Badge tone={item.status === "approved" ? "green" : item.status === "blocked" ? "red" : "purple"}>
-                  {item.status}
+                  {reviewStatusLabel[item.status]}
                 </Badge>
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => reviewDecision(item.id, "approved")}>
                     <CheckCircle2 className="h-3.5 w-3.5" />
-                    Approve
+                    通过
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => reviewDecision(item.id, "blocked")}>
                     <XCircle className="h-3.5 w-3.5" />
-                    Block
+                    阻断
                   </Button>
                 </div>
               </div>
             </div>
           ))}
           <div className="rounded-md border border-border bg-surface p-3 text-xs leading-5 text-muted-foreground">
-            Review decisions emit safety.review events and update worker admission gates in real deployments.
+            复核结果会触发 safety.review 事件，并在真实部署中更新 Worker 准入闸口。
           </div>
         </CardContent>
       </Card>
