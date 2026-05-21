@@ -2105,6 +2105,16 @@ function ComposeWorkspace({
   const activePreviewIndex = composeSettings.previewPlaying ? previewSceneIndex : selectedSceneIndex;
   const previewScene = orderedScenes[activePreviewIndex] ?? selectedScene ?? orderedScenes[0] ?? scenes[0];
   const previewClip = previewScene ? localVideoClips[previewScene.id] : undefined;
+  const previewVideoUrl = localTimelineExport?.url ?? previewClip?.url;
+  const hasSceneGeneration = Boolean(previewScene?.versions.some((version) => version.status === "done"));
+  const previewSourceLabel = localTimelineExport
+    ? "合成成片"
+    : previewClip
+      ? "真实视频片段"
+      : hasSceneGeneration
+        ? "已生成记录，等待真实视频文件"
+        : "等待真实视频素材";
+  const hasAnyPreviewVideo = Boolean(localTimelineExport) || orderedScenes.some((scene) => Boolean(localVideoClips[scene.id]));
   const uploadedClipCount = Object.keys(localVideoClips).length;
   const timelineSeconds = orderedScenes.reduce((total, scene) => {
     const clip = localVideoClips[scene.id];
@@ -2120,14 +2130,14 @@ function ComposeWorkspace({
   }, [orderedScenes.length]);
 
   useEffect(() => {
-    if (!composeSettings.previewPlaying || orderedScenes.length <= 1) {
+    if (!composeSettings.previewPlaying || !hasAnyPreviewVideo || orderedScenes.length <= 1) {
       return;
     }
     const timer = window.setInterval(() => {
       setPreviewSceneIndex((index) => (index + 1) % orderedScenes.length);
     }, 2600);
     return () => window.clearInterval(timer);
-  }, [composeSettings.previewPlaying, orderedScenes.length]);
+  }, [composeSettings.previewPlaying, hasAnyPreviewVideo, orderedScenes.length]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -2171,59 +2181,66 @@ function ComposeWorkspace({
               className={cn(
                 "frame-noise relative mx-auto overflow-hidden rounded-lg border border-white/40 shadow-soft",
                 composeSettings.ratio === "9:16" ? "aspect-[9/16] max-h-[560px]" : "aspect-video",
-                previewScene?.thumbnailClass ?? "bg-[linear-gradient(135deg,#2f4858,#1f9d8a_54%,#f6c85f)]"
+                previewVideoUrl ? "bg-black" : "bg-background"
               )}
             >
-              {previewClip && (
+              {previewVideoUrl ? (
                 <video
-                  key={previewClip.url}
-                  src={previewClip.url}
+                  key={previewVideoUrl}
+                  src={previewVideoUrl}
                   className="absolute inset-0 h-full w-full bg-black object-contain"
                   controls
                   muted={composeSettings.previewPlaying}
                   autoPlay={composeSettings.previewPlaying}
-                  loop
+                  loop={!localTimelineExport}
                   playsInline
                 />
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-[radial-gradient(circle_at_50%_35%,rgba(168,85,247,0.16),transparent_36%),#09090f] px-6 text-center">
+                  <Film className="h-10 w-10 text-muted-foreground/70" />
+                  <div className="mt-4 text-sm font-semibold text-foreground">暂无可播放的真实视频</div>
+                  <p className="mt-2 max-w-md text-xs leading-5 text-muted-foreground">
+                    上传本地视频或完成真实合成后，这里会直接播放对应的视频文件，不再使用预制占位画面。
+                  </p>
+                </div>
               )}
               <div className="absolute inset-x-4 top-4 z-10 flex items-center justify-between">
                 <span className="rounded bg-black/32 px-2 py-1 text-[11px] font-medium text-white/90">
                   {composeSettings.ratio === "9:16" ? "1080×1920" : "1920×1080"}
                 </span>
                 <span className="rounded bg-white/20 px-2 py-1 text-[11px] font-medium text-white/90">
-                  {composeSettings.previewPlaying ? "实时预览" : "已暂停"}
+                  {previewSourceLabel}
                 </span>
               </div>
-              <div className="absolute inset-0 z-10 grid grid-cols-3 grid-rows-3 opacity-25">
-                {Array.from({ length: 9 }).map((_, index) => (
-                  <span key={index} className="border border-white/30" />
-                ))}
-              </div>
-              <div
-                className={cn(
-                  "absolute inset-x-6 z-20 rounded-md bg-black/36 px-4 py-2 text-center text-white",
-                  composeSettings.subtitlePosition === "top" && "top-16",
-                  composeSettings.subtitlePosition === "middle" && "top-1/2 -translate-y-1/2",
-                  composeSettings.subtitlePosition === "bottom" && "bottom-16"
-                )}
-                style={{
-                  color: composeSettings.subtitleColor,
-                  fontSize: Math.max(18, composeSettings.subtitleFontSize / 2)
-                }}
-              >
-                {previewScene?.narration ?? "自动字幕预览"}
-              </div>
-              <div className="absolute inset-x-6 bottom-5 z-20 flex items-center gap-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-foreground">
-                  <Play className="h-4 w-4 fill-current" />
-                </span>
-                <span className="h-1.5 flex-1 rounded-full bg-white/32">
-                  <span
-                    className="block h-full rounded-full bg-white transition-all"
-                    style={{ width: `${exportStatus === "merging" ? exportProgress : previewProgress}%` }}
-                  />
-                </span>
-              </div>
+              {previewVideoUrl && (
+                <>
+                  <div
+                    className={cn(
+                      "absolute inset-x-6 z-20 rounded-md bg-black/36 px-4 py-2 text-center text-white",
+                      composeSettings.subtitlePosition === "top" && "top-16",
+                      composeSettings.subtitlePosition === "middle" && "top-1/2 -translate-y-1/2",
+                      composeSettings.subtitlePosition === "bottom" && "bottom-16"
+                    )}
+                    style={{
+                      color: composeSettings.subtitleColor,
+                      fontSize: Math.max(18, composeSettings.subtitleFontSize / 2)
+                    }}
+                  >
+                    {previewScene?.narration ?? "自动字幕预览"}
+                  </div>
+                  <div className="absolute inset-x-6 bottom-5 z-20 flex items-center gap-3">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-foreground">
+                      <Play className="h-4 w-4 fill-current" />
+                    </span>
+                    <span className="h-1.5 flex-1 rounded-full bg-white/32">
+                      <span
+                        className="block h-full rounded-full bg-white transition-all"
+                        style={{ width: `${exportStatus === "merging" ? exportProgress : previewProgress}%` }}
+                      />
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-background p-3">
               <div className="text-xs text-muted-foreground">
@@ -2244,6 +2261,7 @@ function ComposeWorkspace({
                 </Button>
                 <Button
                   size="sm"
+                  disabled={!hasAnyPreviewVideo}
                   onClick={(event) => {
                     event.stopPropagation();
                     setPreviewSceneIndex(activePreviewIndex);
