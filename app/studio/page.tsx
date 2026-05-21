@@ -2164,16 +2164,6 @@ function ComposeWorkspace({
     setPreviewSceneIndex((index) => Math.min(index, Math.max(orderedScenes.length - 1, 0)));
   }, [orderedScenes.length]);
 
-  useEffect(() => {
-    if (!composeSettings.previewPlaying || !hasAnyPreviewVideo || orderedScenes.length <= 1) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      setPreviewSceneIndex((index) => (index + 1) % orderedScenes.length);
-    }, 2600);
-    return () => window.clearInterval(timer);
-  }, [composeSettings.previewPlaying, hasAnyPreviewVideo, orderedScenes.length]);
-
   return (
     <div className="flex flex-col gap-5">
       <Card>
