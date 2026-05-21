@@ -3,22 +3,26 @@
 @tailwind utilities;
 
 :root {
-  --background: 0 0% 98%;
-  --foreground: 220 14% 9%;
-  --surface: 0 0% 100%;
-  --muted: 210 16% 94%;
-  --muted-foreground: 218 9% 42%;
-  --border: 214 15% 86%;
-  --input: 214 15% 86%;
-  --ring: 174 72% 31%;
-  --primary: 174 72% 28%;
+  --background: 240 8% 4%;
+  --foreground: 0 0% 96%;
+  --surface: 240 6% 8%;
+  --sidebar: 240 10% 3%;
+  --elevated: 240 6% 11%;
+  --muted: 240 5% 14%;
+  --muted-foreground: 240 4% 58%;
+  --border: 240 5% 18%;
+  --input: 240 5% 20%;
+  --ring: 280 85% 62%;
+  --primary: 280 78% 58%;
   --primary-foreground: 0 0% 100%;
-  --accent: 252 70% 56%;
+  --accent: 330 82% 58%;
   --accent-foreground: 0 0% 100%;
-  --destructive: 0 73% 45%;
+  --destructive: 0 72% 52%;
   --destructive-foreground: 0 0% 100%;
-  --success: 155 64% 36%;
-  --warning: 38 91% 48%;
+  --success: 155 55% 42%;
+  --warning: 38 88% 52%;
+  --gradient-brand: linear-gradient(135deg, #8b5cf6 0%, #d946ef 48%, #f472b6 100%);
+  --gradient-surface: linear-gradient(180deg, hsl(240 8% 6%) 0%, hsl(240 10% 3%) 100%);
 }
 
 * {
@@ -30,13 +34,16 @@ body {
   min-height: 100%;
 }
 
+html {
+  color-scheme: dark;
+}
+
 body {
   margin: 0;
-  background:
-    linear-gradient(180deg, rgba(249, 250, 251, 0.96), rgba(242, 244, 247, 0.96)),
-    #f7f7f7;
+  background: var(--gradient-surface);
   color: hsl(var(--foreground));
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
 }
 
 button,
@@ -47,14 +54,15 @@ textarea {
 }
 
 ::selection {
-  background: rgba(20, 184, 166, 0.24);
+  background: rgba(168, 85, 247, 0.35);
 }
 
 .panel-grid {
   background-image:
-    linear-gradient(rgba(15, 23, 42, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(15, 23, 42, 0.04) 1px, transparent 1px);
-  background-size: 28px 28px;
+    radial-gradient(circle at 50% 0%, rgba(139, 92, 246, 0.08), transparent 42%),
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 100% 100%, 32px 32px, 32px 32px;
 }
 
 .frame-noise {
@@ -68,13 +76,33 @@ textarea {
   content: "";
   pointer-events: none;
   background:
-    radial-gradient(circle at 20% 25%, rgba(255, 255, 255, 0.34), transparent 26%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.14), transparent 48%),
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.06) 1px, transparent 1px, transparent 4px);
-  mix-blend-mode: screen;
+    radial-gradient(circle at 20% 25%, rgba(255, 255, 255, 0.12), transparent 28%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.06), transparent 48%);
+  mix-blend-mode: overlay;
 }
 
 .scrollbar-thin {
-  scrollbar-color: rgba(15, 23, 42, 0.26) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
   scrollbar-width: thin;
+}
+
+@layer utilities {
+  .text-gradient {
+    background: var(--gradient-brand);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .bg-brand-gradient {
+    background: var(--gradient-brand);
+  }
+
+  .shadow-glow {
+    box-shadow: 0 0 24px rgba(139, 92, 246, 0.35);
+  }
+
+  .shadow-glow-sm {
+    box-shadow: 0 0 12px rgba(139, 92, 246, 0.22);
+  }
 }

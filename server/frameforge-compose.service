@@ -1,0 +1,16 @@
+[Unit]
+Description=FrameForge local MP4 compose API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/frameforge/api
+Environment=PORT=4174
+Environment=MAX_UPLOAD_MB=512
+Environment=FRAMEFORGE_WORK_DIR=/tmp/frameforge-compose
+ExecStart=/usr/bin/node /var/www/frameforge/api/local-compose-api.mjs
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

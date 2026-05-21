@@ -5,11 +5,16 @@ import {
   defaultVideoParameterSchemas,
   getDefaultParameterValues
 } from "@/lib/model-parameter-schema";
-import { defaultScenes, llmModels, videoModels } from "@/lib/mock-data";
-import type { PipelinePhase, Scene, VideoGenerationConfig } from "@/lib/types";
-
-type ScriptStatus = "idle" | "generating" | "ready";
-type ExportStatus = "idle" | "merging" | "ready";
+import { llmModels, videoModels } from "@/lib/mock-data";
+import { createDefaultRecordState, resetScenesForRecord } from "@/lib/record-utils";
+import type {
+  ExportStatus,
+  GenerationRecordState,
+  PipelinePhase,
+  Scene,
+  ScriptStatus,
+  VideoGenerationConfig
+} from "@/lib/types";
 
 interface StudioState {
   brief: string;
@@ -65,20 +70,7 @@ interface StudioState {
   resetPipeline: () => void;
 }
 
-const starterScript = `镜头 1: 清晨工作室，创作者输入产品卖点，AI 生成三段短视频脚本。
-镜头 2: 脚本被拆成分镜卡片，每个镜头自动标注场景、运镜、时长与模型。
-镜头 3: 平台按质量、速度、成本选择视频模型，分镜并行生成。
-镜头 4: 成片自动合并，套用品牌片头片尾，导出 1080p 与社媒切片。`;
-
-const resetScenes = () =>
-  defaultScenes.map((scene) => ({
-    ...scene,
-    status: "idle" as const,
-    progress: 0,
-    failureReason: undefined,
-    versions: [],
-    selectedVersionId: undefined
-  }));
+const resetScenes = resetScenesForRecord;
 
 const reindexScenes = (scenes: Scene[]) =>
   scenes.map((scene, index) => ({
@@ -122,30 +114,10 @@ const createVersion = (scene: Scene) => {
   };
 };
 
+const initialRecordState = createDefaultRecordState();
+
 export const useStudioStore = create<StudioState>((set, get) => ({
-  brief:
-    "为一款面向内容创作者的 AI 视频工具生成 20 秒产品短片，突出脚本到分镜再到导出的自动化流程。",
-  tone: "专业克制",
-  duration: "30s",
-  aspectRatio: "16:9",
-  styleTags: ["科普", "广告"],
-  targetPlatform: "抖音",
-  language: "中",
-  llmModelId: llmModels[0].id,
-  temperature: 0.72,
-  maxTokens: 1800,
-  systemPrompt: "你是一名短视频导演，请输出可直接用于视频生成的分镜脚本，保持画面描述具体、节奏清晰。",
-  tokenUsage: 0,
-  generationTimeMs: 0,
-  modelVersion: llmModels[0].version,
-  phase: "brief",
-  scriptStatus: "idle",
-  script: starterScript,
-  scenes: resetScenes(),
-  activeSceneId: "scene-01",
-  exportFormat: "1080p MP4",
-  exportStatus: "idle",
-  exportProgress: 0,
+  ...initialRecordState,
   setBrief: (brief) => set({ brief }),
   setTone: (tone) => set({ tone }),
   setDuration: (duration) => set({ duration }),
@@ -489,16 +461,41 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       }
     }, 360);
   },
-  resetPipeline: () =>
-    set({
-      phase: "brief",
-      scriptStatus: "idle",
-      script: starterScript,
-      scenes: resetScenes(),
-      activeSceneId: "scene-01",
-      exportStatus: "idle",
-      exportProgress: 0,
-      tokenUsage: 0,
-      generationTimeMs: 0
-    })
+  resetPipeline: () => set(createDefaultRecordState())
 }));
+
+export function getRecordSnapshot(
+  state: StudioState = useStudioStore.getState()
+): GenerationRecordState {
+  return {
+    brief: state.brief,
+    tone: state.tone,
+    duration: state.duration,
+    aspectRatio: state.aspectRatio,
+    styleTags: state.styleTags,
+    targetPlatform: state.targetPlatform,
+    language: state.language,
+    llmModelId: state.llmModelId,
+    temperature: state.temperature,
+    maxTokens: state.maxTokens,
+    systemPrompt: state.systemPrompt,
+    tokenUsage: state.tokenUsage,
+    generationTimeMs: state.generationTimeMs,
+    modelVersion: state.modelVersion,
+    phase: state.phase,
+    scriptStatus: state.scriptStatus,
+    script: state.script,
+    scenes: state.scenes,
+    activeSceneId: state.activeSceneId,
+    exportFormat: state.exportFormat,
+    exportStatus: state.exportStatus,
+    exportProgress: state.exportProgress
+  };
+}
+
+export function hydrateRecordState(snapshot: GenerationRecordState) {
+  useStudioStore.setState({
+    ...snapshot,
+    scenes: snapshot.scenes.map((scene) => ({ ...scene, versions: [...scene.versions] }))
+  });
+}

@@ -157,3 +157,123 @@ export interface PipelineEvent {
   progress: number;
   message: string;
 }
+
+export type ScriptStatus = "idle" | "generating" | "ready";
+export type ExportStatus = "idle" | "merging" | "ready";
+export type RecordStepStatus = "draft" | "script" | "storyboard" | "compose" | "export" | "complete";
+export type PreviewRatio = "9:16" | "16:9";
+export type TimelineTransition = "fade" | "cut";
+export type LocalComposeStatus = "idle" | "merging" | "ready" | "error";
+
+export interface RecordComposeSettings {
+  ratio: PreviewRatio;
+  timelineOrder: string[];
+  trims: Record<string, { start: number; end: number }>;
+  transitions: Record<string, TimelineTransition>;
+  bgmMode: "upload" | "library";
+  bgmFileName: string;
+  musicLibraryTrack: string;
+  bgmVolume: number;
+  subtitlePosition: "bottom" | "middle" | "top";
+  subtitleFontSize: number;
+  subtitleColor: string;
+  ttsModel: string;
+  ttsVoice: string;
+  exportProfile: "MP4 1080P" | "MP4 720P";
+  watermark: boolean;
+}
+
+export interface PersistedVideoClipMeta {
+  sceneId: string;
+  name: string;
+  type: string;
+  size: number;
+  duration: number;
+}
+
+export interface PersistedTimelineExportMeta {
+  fileName: string;
+  mimeType: string;
+  size: number;
+  duration: number;
+  createdAt: string;
+}
+
+/** 记录绑定的本地素材元数据（视频 Blob 存 IndexedDB） */
+export interface RecordLocalAssets {
+  clips: PersistedVideoClipMeta[];
+  timelineExport: PersistedTimelineExportMeta | null;
+  composeSettings: RecordComposeSettings | null;
+  localComposeStatus: LocalComposeStatus;
+  localComposeProgress: number;
+  localComposeError: string;
+}
+
+export interface RuntimeVideoClip {
+  sceneId: string;
+  name: string;
+  url: string;
+  type: string;
+  size: number;
+  duration: number;
+  file: File;
+}
+
+export interface RuntimeTimelineExport {
+  url: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  duration: number;
+  createdAt: string;
+  blob: Blob;
+}
+
+/** 单条「脚本 → 分镜 → 合成 → 导出」流水线的完整状态快照 */
+export interface GenerationRecordState {
+  brief: string;
+  tone: string;
+  duration: string;
+  aspectRatio: string;
+  styleTags: string[];
+  targetPlatform: string;
+  language: string;
+  llmModelId: string;
+  temperature: number;
+  maxTokens: number;
+  systemPrompt: string;
+  tokenUsage: number;
+  generationTimeMs: number;
+  modelVersion: string;
+  phase: PipelinePhase;
+  scriptStatus: ScriptStatus;
+  script: string;
+  scenes: Scene[];
+  activeSceneId: string;
+  exportFormat: string;
+  exportStatus: ExportStatus;
+  exportProgress: number;
+}
+
+/** 项目内的一条生成记录（可有多条） */
+export interface GenerationRecord {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  stepStatus: RecordStepStatus;
+  /** 列表封面，JPEG data URL */
+  coverThumbnail?: string;
+  state: GenerationRecordState;
+  assets: RecordLocalAssets;
+}
+
+/** 创作项目，包含多条生成记录 */
+export interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+  records: GenerationRecord[];
+}

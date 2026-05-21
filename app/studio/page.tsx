@@ -13,8 +13,6 @@ import {
   Clock3,
   Download,
   Film,
-  Folder,
-  FolderOpen,
   GripVertical,
   Layers3,
   Loader2,
@@ -43,13 +41,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/form";
 import { Progress } from "@/components/ui/progress";
 import { SchemaParameterForm } from "@/components/schema-parameter-form";
+import { ProjectSidebar } from "@/components/studio/project-sidebar";
 import { VideoFrame } from "@/components/video-frame";
 import { getDurationSecondsFromConfig } from "@/lib/model-parameter-schema";
+import { createDefaultComposeSettings } from "@/lib/record-utils";
 import { llmModels, videoModels } from "@/lib/mock-data";
 import type { SceneStatus, VideoGenerationConfig } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { persistActiveRecordAssetsWithCover } from "@/store/project-store";
+import { useProjectStore } from "@/store/project-store";
 import { useModelSchemaStore } from "@/store/model-schema-store";
+import type { ComposeSettings } from "@/store/record-assets-store";
+import { useRecordAssetsStore } from "@/store/record-assets-store";
 import { useStudioStore } from "@/store/studio-store";
+import type { RuntimeTimelineExport, RuntimeVideoClip } from "@/lib/types";
 
 type StudioStep = "script" | "storyboard" | "compose" | "export";
 type PreviewRatio = "9:16" | "16:9";
@@ -61,45 +66,10 @@ type ComposeSelection =
   | { type: "subtitle" }
   | { type: "voice" };
 
-interface ComposeSettings {
-  ratio: PreviewRatio;
-  timelineOrder: string[];
-  trims: Record<string, { start: number; end: number }>;
-  transitions: Record<string, TimelineTransition>;
-  bgmMode: "upload" | "library";
-  bgmFileName: string;
-  musicLibraryTrack: string;
-  bgmVolume: number;
-  subtitlePosition: "bottom" | "middle" | "top";
-  subtitleFontSize: number;
-  subtitleColor: string;
-  ttsModel: string;
-  ttsVoice: string;
-  exportProfile: "MP4 1080P" | "MP4 720P";
-  watermark: boolean;
-  previewPlaying: boolean;
-}
-
-interface LocalVideoClip {
-  sceneId: string;
-  name: string;
-  url: string;
-  type: string;
-  size: number;
-  duration: number;
-  file: File;
-}
-
-interface LocalTimelineExport {
-  url: string;
-  fileName: string;
-  mimeType: string;
-  size: number;
-  duration: number;
-  createdAt: string;
-}
-
-type LocalComposeStatus = "idle" | "merging" | "ready" | "error";
+type LocalComposeStatus = import("@/lib/types").LocalComposeStatus;
+type LocalVideoClip = RuntimeVideoClip;
+type LocalTimelineExport = RuntimeTimelineExport;
+type StudioScene = ReturnType<typeof useStudioStore.getState>["scenes"][number];
 
 const pipelineSteps: Array<{
   id: StudioStep;
@@ -111,13 +81,6 @@ const pipelineSteps: Array<{
   { id: "storyboard", number: "②", label: "分镜视频", description: "Shots & Models" },
   { id: "compose", number: "③", label: "视频合成", description: "Merge Timeline" },
   { id: "export", number: "④", label: "导出", description: "Delivery" }
-];
-
-const projectItems = [
-  { name: "Creator SaaS Launch", meta: "20s · 4 scenes", active: true },
-  { name: "Fashion Drop Film", meta: "30s · draft", active: false },
-  { name: "App Explainer", meta: "45s · review", active: false },
-  { name: "Commerce Batch", meta: "12 variants", active: false }
 ];
 
 const sceneStatusLabel: Record<SceneStatus, string> = {
@@ -149,12 +112,117 @@ function formatBytes(value: number) {
 
 function getRecorderMimeType() {
   const candidates = [
-    "video/webm;codecs=vp9,opus",
-    "video/webm;codecs=vp8,opus",
-    "video/webm;codecs=h264,opus",
-    "video/webm"
+    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    "video/mp4;codecs=avc1.42E01E",
+    "video/mp4;codecs=h264,aac",
+    "video/mp4"
   ];
   return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? "";
+}
+
+function getTimelineDuration(
+  scenes: StudioScene[],
+  clips: Record<string, LocalVideoClip>,
+  settings: ComposeSettings
+) {
+  return scenes.reduce((total, scene) => {
+    const fallbackEnd = clips[scene.id]?.duration ?? scene.duration;
+    const trim = settings.trims[scene.id] ?? { start: 0, end: fallbackEnd };
+    return total + Math.max(0.4, trim.end - trim.start);
+  }, 0);
+}
+
+async function readComposeError(response: Response) {
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/json")) {
+    const data = (await response.json().catch(() => null)) as { error?: string } | null;
+    return data?.error ?? "MP4 合成服务返回了未知错误。";
+  }
+
+  const text = await response.text().catch(() => "");
+  return text.trim() || "MP4 合成服务返回了未知错误。";
+}
+
+async function composeLocalTimelineViaApi({
+  scenes,
+  clips,
+  settings,
+  onProgress
+}: {
+  scenes: StudioScene[];
+  clips: Record<string, LocalVideoClip>;
+  settings: ComposeSettings;
+  onProgress: (progress: number) => void;
+}) {
+  if (window.location.protocol === "file:") {
+    throw new Error("当前是本地 file 预览，无法连接 MP4 合成服务。请使用线上地址或启动带 API 的预览服务。");
+  }
+
+  const totalSeconds = getTimelineDuration(scenes, clips, settings);
+  const formData = new FormData();
+  const payload = {
+    ratio: settings.ratio,
+    exportProfile: settings.exportProfile,
+    scenes: scenes.map((scene) => {
+      const fallbackEnd = clips[scene.id]?.duration ?? scene.duration;
+      const trim = settings.trims[scene.id] ?? { start: 0, end: fallbackEnd };
+      return {
+        id: scene.id,
+        index: scene.index,
+        title: scene.title,
+        narration: scene.narration,
+        duration: scene.duration,
+        trimStart: trim.start,
+        trimEnd: trim.end,
+        hasClip: Boolean(clips[scene.id])
+      };
+    })
+  };
+
+  formData.append("payload", JSON.stringify(payload));
+  scenes.forEach((scene) => {
+    const clip = clips[scene.id];
+    if (clip) {
+      formData.append(`clip:${scene.id}`, clip.file, clip.name);
+    }
+  });
+
+  let simulatedProgress = 8;
+  onProgress(simulatedProgress);
+  const timer = window.setInterval(() => {
+    simulatedProgress = Math.min(92, simulatedProgress + 3);
+    onProgress(simulatedProgress);
+  }, 1200);
+
+  try {
+    const response = await fetch("/api/local-compose", {
+      method: "POST",
+      body: formData
+    });
+
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!response.ok) {
+      throw new Error(await readComposeError(response));
+    }
+    if (!contentType.includes("video/mp4")) {
+      throw new Error("MP4 合成服务没有返回 video/mp4 文件，请检查云端合成服务是否已启动。");
+    }
+
+    const blob = await response.blob();
+    if (!blob.size) {
+      throw new Error("MP4 合成服务返回了空文件，请重试。");
+    }
+
+    onProgress(100);
+    return {
+      blob: new Blob([blob], { type: "video/mp4" }),
+      mimeType: "video/mp4",
+      duration: totalSeconds
+    };
+  } finally {
+    window.clearInterval(timer);
+  }
 }
 
 function waitForVideoMetadata(video: HTMLVideoElement) {
@@ -271,7 +339,7 @@ async function renderPlaceholderSegment({
   updateProgress
 }: {
   context: CanvasRenderingContext2D;
-  scene: ReturnType<typeof useStudioStore.getState>["scenes"][number];
+  scene: StudioScene;
   canvasWidth: number;
   canvasHeight: number;
   seconds: number;
@@ -299,7 +367,7 @@ async function renderVideoSegment({
   audioContext
 }: {
   context: CanvasRenderingContext2D;
-  scene: ReturnType<typeof useStudioStore.getState>["scenes"][number];
+  scene: StudioScene;
   clip: LocalVideoClip;
   trim: { start: number; end: number };
   canvasWidth: number;
@@ -352,18 +420,34 @@ async function composeLocalTimeline({
   settings,
   onProgress
 }: {
-  scenes: ReturnType<typeof useStudioStore.getState>["scenes"];
+  scenes: StudioScene[];
   clips: Record<string, LocalVideoClip>;
   settings: ComposeSettings;
   onProgress: (progress: number) => void;
 }) {
+  const hasUploadedClips = scenes.some((scene) => Boolean(clips[scene.id]));
+  let apiError = "";
+
+  if (hasUploadedClips) {
+    try {
+      return await composeLocalTimelineViaApi({
+        scenes,
+        clips,
+        settings,
+        onProgress
+      });
+    } catch (error) {
+      apiError = error instanceof Error ? error.message : "MP4 合成服务调用失败。";
+    }
+  }
+
   if (!("MediaRecorder" in window)) {
-    throw new Error("当前浏览器不支持 MediaRecorder，无法在本地合成视频。");
+    throw new Error(`${apiError ? `${apiError} ` : ""}当前浏览器不支持 MediaRecorder，无法在本地生成 MP4。`);
   }
 
   const mimeType = getRecorderMimeType();
   if (!mimeType) {
-    throw new Error("当前浏览器不支持可用的视频录制编码。建议使用最新版 Chrome 或 Edge。");
+    throw new Error(`${apiError ? `${apiError} ` : ""}当前浏览器不支持 MP4 录制编码，请使用线上 MP4 合成服务或最新版本 Chrome / Edge。`);
   }
 
   const isVertical = settings.ratio === "9:16";
@@ -407,11 +491,7 @@ async function composeLocalTimeline({
     recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
   });
 
-  const totalSeconds = scenes.reduce((total, scene) => {
-    const fallbackEnd = clips[scene.id]?.duration ?? scene.duration;
-    const trim = settings.trims[scene.id] ?? { start: 0, end: fallbackEnd };
-    return total + Math.max(0.4, trim.end - trim.start);
-  }, 0);
+  const totalSeconds = getTimelineDuration(scenes, clips, settings);
   let completedSeconds = 0;
 
   recorder.start(1000);
@@ -470,29 +550,24 @@ export default function StudioPage() {
   const [activeStep, setActiveStep] = useState<StudioStep>("script");
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
   const [composeSelection, setComposeSelection] = useState<ComposeSelection>({ type: "preview" });
-  const [composeSettings, setComposeSettings] = useState<ComposeSettings>({
-    ratio: "9:16",
-    timelineOrder: [],
-    trims: {},
-    transitions: {},
-    bgmMode: "library",
-    bgmFileName: "",
-    musicLibraryTrack: "Warm Creator Pulse",
-    bgmVolume: 62,
-    subtitlePosition: "bottom",
-    subtitleFontSize: 42,
-    subtitleColor: "#ffffff",
-    ttsModel: "Azure TTS",
-    ttsVoice: "zh-CN-Xiaoxiao",
-    exportProfile: "MP4 1080P",
-    watermark: true,
-    previewPlaying: false
-  });
-  const [localVideoClips, setLocalVideoClips] = useState<Record<string, LocalVideoClip>>({});
-  const [localTimelineExport, setLocalTimelineExport] = useState<LocalTimelineExport | null>(null);
-  const [localComposeStatus, setLocalComposeStatus] = useState<LocalComposeStatus>("idle");
-  const [localComposeProgress, setLocalComposeProgress] = useState(0);
-  const [localComposeError, setLocalComposeError] = useState("");
+  const activeRecordId = useProjectStore((s) => s.activeRecordId);
+  const {
+    localVideoClips,
+    localTimelineExport,
+    composeSettings,
+    localComposeStatus,
+    localComposeProgress,
+    localComposeError,
+    isLoading: assetsLoading,
+    setComposeSettings,
+    setLocalComposeStatus,
+    setLocalComposeProgress,
+    setLocalComposeError,
+    addClip,
+    removeClip,
+    setTimelineExport,
+    clearRuntime
+  } = useRecordAssetsStore();
   const localVideoClipsRef = useRef<Record<string, LocalVideoClip>>({});
   const localTimelineExportRef = useRef<LocalTimelineExport | null>(null);
 
@@ -604,15 +679,6 @@ export default function StudioPage() {
     localTimelineExportRef.current = localTimelineExport;
   }, [localTimelineExport]);
 
-  useEffect(
-    () => () => {
-      Object.values(localVideoClipsRef.current).forEach((clip) => URL.revokeObjectURL(clip.url));
-      if (localTimelineExportRef.current) {
-        URL.revokeObjectURL(localTimelineExportRef.current.url);
-      }
-    },
-    []
-  );
 
   const handleGenerateScript = () => {
     setActiveStep("script");
@@ -629,8 +695,8 @@ export default function StudioPage() {
     renderScenes();
   };
 
-  const handleLocalVideoUpload = (sceneId: string, file: File | null | undefined) => {
-    if (!file) {
+  const handleLocalVideoUpload = async (sceneId: string, file: File | null | undefined) => {
+    if (!file || !activeRecordId) {
       return;
     }
 
@@ -640,72 +706,29 @@ export default function StudioPage() {
       return;
     }
 
-    const previousClip = localVideoClipsRef.current[sceneId];
-    if (previousClip) {
-      URL.revokeObjectURL(previousClip.url);
-    }
-
-    const url = URL.createObjectURL(file);
-    const video = document.createElement("video");
-    video.preload = "metadata";
-    video.src = url;
-
-    video.onloadedmetadata = () => {
-      const durationSeconds = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 5;
-      const roundedDuration = Math.max(1, Math.round(durationSeconds * 10) / 10);
-
-      setLocalVideoClips((clips) => ({
-        ...clips,
-        [sceneId]: {
-          sceneId,
-          file,
-          url,
-          name: file.name,
-          type: file.type || "video/*",
-          size: file.size,
-          duration: roundedDuration
-        }
-      }));
-      updateScene(sceneId, { duration: Math.max(1, Math.round(roundedDuration)) });
-      updateSceneTrim(sceneId, { start: 0, end: roundedDuration });
-      setLocalTimelineExport((current) => {
-        if (current) {
-          URL.revokeObjectURL(current.url);
-        }
-        return null;
-      });
-      setLocalComposeStatus("idle");
-      setLocalComposeProgress(0);
-      setLocalComposeError("");
-    };
-
-    video.onerror = () => {
-      URL.revokeObjectURL(url);
+    try {
+      await addClip(activeRecordId, sceneId, file);
+      const clip = useRecordAssetsStore.getState().localVideoClips[sceneId];
+      if (clip) {
+        updateScene(sceneId, { duration: Math.max(1, Math.round(clip.duration)) });
+        updateSceneTrim(sceneId, { start: 0, end: clip.duration });
+      }
+      await persistActiveRecordAssetsWithCover();
+    } catch (error) {
       setLocalComposeStatus("error");
-      setLocalComposeError("无法读取视频元数据，请换一个编码更标准的视频文件。");
-    };
+      setLocalComposeError(error instanceof Error ? error.message : "无法读取视频元数据。");
+    }
   };
 
-  const handleRemoveLocalVideo = (sceneId: string) => {
-    const currentClip = localVideoClipsRef.current[sceneId];
-    if (currentClip) {
-      URL.revokeObjectURL(currentClip.url);
+  const handleRemoveLocalVideo = async (sceneId: string) => {
+    if (!activeRecordId) {
+      return;
     }
-
-    setLocalVideoClips((clips) => {
-      const next = { ...clips };
-      delete next[sceneId];
-      return next;
-    });
-    setLocalTimelineExport((current) => {
-      if (current) {
-        URL.revokeObjectURL(current.url);
-      }
-      return null;
-    });
+    await removeClip(activeRecordId, sceneId);
     setLocalComposeStatus("idle");
     setLocalComposeProgress(0);
     setLocalComposeError("");
+    await persistActiveRecordAssetsWithCover();
   };
 
   const handleMergeExport = async () => {
@@ -726,12 +749,9 @@ export default function StudioPage() {
 
     setLocalComposeStatus("merging");
     setLocalComposeProgress(1);
-    setLocalTimelineExport((current) => {
-      if (current) {
-        URL.revokeObjectURL(current.url);
-      }
-      return null;
-    });
+    if (activeRecordId) {
+      await useRecordAssetsStore.getState().clearTimelineExport(activeRecordId);
+    }
     mergeExport();
 
     try {
@@ -741,21 +761,15 @@ export default function StudioPage() {
         settings: composeSettings,
         onProgress: setLocalComposeProgress
       });
-      const url = URL.createObjectURL(result.blob);
-      const extension = result.mimeType.includes("mp4") ? "mp4" : "webm";
-      setLocalTimelineExport({
-        url,
-        fileName: `frameforge-local-compose-${Date.now()}.${extension}`,
-        mimeType: result.mimeType,
-        size: result.blob.size,
-        duration: result.duration,
-        createdAt: new Intl.DateTimeFormat("zh-CN", {
-          hour: "2-digit",
-          minute: "2-digit"
-        }).format(new Date())
-      });
-      setLocalComposeStatus("ready");
-      setLocalComposeProgress(100);
+      if (activeRecordId) {
+        await setTimelineExport(activeRecordId, {
+          blob: result.blob,
+          fileName: `jimeng-compose-${Date.now()}.mp4`,
+          mimeType: result.mimeType,
+          duration: result.duration
+        });
+        await persistActiveRecordAssetsWithCover();
+      }
       setActiveStep("export");
     } catch (error) {
       setLocalComposeStatus("error");
@@ -763,23 +777,39 @@ export default function StudioPage() {
     }
   };
 
-  const resetAll = () => {
+  const resetAll = async () => {
     resetPipeline();
     setActiveStep("script");
-    Object.values(localVideoClipsRef.current).forEach((clip) => URL.revokeObjectURL(clip.url));
-    setLocalVideoClips({});
-    setLocalTimelineExport((current) => {
-      if (current) {
-        URL.revokeObjectURL(current.url);
+    if (activeRecordId) {
+      const assets = useProjectStore.getState().projects
+        .find((p) => p.id === useProjectStore.getState().activeProjectId)
+        ?.records.find((r) => r.id === activeRecordId)?.assets;
+      if (assets) {
+        await useRecordAssetsStore.getState().deleteRecordMedia(activeRecordId, assets);
       }
-      return null;
-    });
-    setLocalComposeStatus("idle");
-    setLocalComposeProgress(0);
-    setLocalComposeError("");
+      const sceneIds = scenes.map((s) => s.id);
+      useProjectStore.getState().updateActiveRecordAssets(
+        {
+          clips: [],
+          timelineExport: null,
+          composeSettings: createDefaultComposeSettings(sceneIds),
+          localComposeStatus: "idle",
+          localComposeProgress: 0,
+          localComposeError: ""
+        },
+        undefined
+      );
+      clearRuntime();
+      setComposeSettings({ ...createDefaultComposeSettings(sceneIds), previewPlaying: false });
+    } else {
+      clearRuntime();
+    }
   };
 
   useEffect(() => {
+    if (assetsLoading) {
+      return;
+    }
     setComposeSettings((settings) => {
       const sceneIds = scenes.map((scene) => scene.id);
       const orderedExisting = settings.timelineOrder.filter((sceneId) => sceneIds.includes(sceneId));
@@ -800,7 +830,7 @@ export default function StudioPage() {
         transitions: nextTransitions
       };
     });
-  }, [scenes]);
+  }, [assetsLoading, scenes, setComposeSettings]);
 
   const updateComposeSettings = (patch: Partial<ComposeSettings>) => {
     setComposeSettings((settings) => ({ ...settings, ...patch }));
@@ -846,20 +876,22 @@ export default function StudioPage() {
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <header className="fixed inset-x-0 top-0 z-40 border-b border-border bg-background/94 px-4 py-3 backdrop-blur lg:h-[76px] lg:px-6 lg:py-0">
+      <header className="fixed inset-x-0 top-0 z-40 border-b border-border/70 bg-background/80 px-4 py-3 backdrop-blur-xl lg:h-[72px] lg:px-6 lg:py-0">
         <div className="flex h-full flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex min-w-[220px] items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-md bg-foreground text-white">
+          <div className="flex min-w-[200px] items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-gradient text-white shadow-glow-sm">
               <Film className="h-4 w-4" />
             </div>
             <div>
-              <div className="text-sm font-semibold">FrameForge Studio</div>
-              <div className="text-xs text-muted-foreground">AI Video Creation Workspace</div>
+              <div className="text-sm font-semibold">
+                <span className="text-gradient">即梦工坊</span>
+              </div>
+              <div className="text-[11px] text-muted-foreground">脚本 · 分镜 · 合成 · 导出</div>
             </div>
           </div>
 
           <nav aria-label="Pipeline progress" className="flex min-w-0 flex-1 items-center justify-center">
-            <div className="flex w-full max-w-3xl items-center overflow-x-auto rounded-lg border border-border bg-surface px-2 py-2 shadow-sm">
+            <div className="flex w-full max-w-3xl items-center overflow-x-auto rounded-2xl border border-border/60 bg-elevated/80 px-2 py-1.5 shadow-soft">
               {pipelineSteps.map((step, index) => {
                 const completed = completedByStep[step.id];
                 const running = runningByStep[step.id] || (activeStep === step.id && !completed);
@@ -868,20 +900,20 @@ export default function StudioPage() {
                     <button
                       onClick={() => setActiveStep(step.id)}
                       className={cn(
-                        "flex h-10 items-center gap-2 rounded-md px-3 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-ring",
+                        "flex h-10 items-center gap-2 rounded-xl px-3 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-primary/40",
                         activeStep === step.id
-                          ? "bg-primary/[0.09] text-primary"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                          ? "bg-primary/15 text-primary shadow-glow-sm"
+                          : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                       )}
                     >
                       <span
                         className={cn(
                           "flex h-6 w-6 items-center justify-center rounded-full border text-xs font-semibold",
                           completed
-                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
                             : running
-                              ? "border-primary/35 bg-primary/10 text-primary"
-                              : "border-border bg-background text-muted-foreground"
+                              ? "border-primary/40 bg-primary/15 text-primary"
+                              : "border-border/80 bg-background text-muted-foreground"
                         )}
                       >
                         {completed ? (
@@ -908,16 +940,16 @@ export default function StudioPage() {
             </div>
           </nav>
 
-          <div className="hidden min-w-[220px] items-center justify-end gap-2 lg:flex">
+          <div className="hidden min-w-[200px] items-center justify-end gap-2 lg:flex">
             <Button variant="outline" size="sm" onClick={resetAll}>
               <RefreshCcw className="h-3.5 w-3.5" />
-              重置
+              重置当前记录
             </Button>
             <Link
               href="/admin"
-              className="inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded-md bg-foreground px-3 text-xs font-medium text-white shadow-sm transition-colors hover:bg-foreground/90 focus:outline-none focus:ring-2 focus:ring-ring"
+              className="inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded-lg border border-border/70 bg-elevated px-3 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
             >
-              Admin Console
+              运营后台
               <ArrowRight className="h-3.5 w-3.5" />
             </Link>
           </div>
@@ -926,10 +958,10 @@ export default function StudioPage() {
 
       <div
         className={cn(
-          "grid min-h-screen grid-cols-1 pt-[126px] lg:pt-[76px]",
+          "grid min-h-screen grid-cols-1 pt-[126px] lg:pt-[72px]",
           propertiesCollapsed
-            ? "lg:grid-cols-[260px_minmax(0,1fr)_64px]"
-            : "lg:grid-cols-[260px_minmax(0,1fr)_336px]"
+            ? "lg:grid-cols-[288px_minmax(0,1fr)_64px]"
+            : "lg:grid-cols-[288px_minmax(0,1fr)_336px]"
         )}
       >
         <ProjectSidebar />
@@ -1069,72 +1101,6 @@ export default function StudioPage() {
   );
 }
 
-function ProjectSidebar() {
-  return (
-    <aside className="hidden border-r border-border bg-surface lg:block">
-      <div className="flex h-full flex-col p-4">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <Label>项目导航</Label>
-            <div className="mt-1 text-sm font-semibold">创作项目</div>
-          </div>
-          <Button size="icon" variant="outline" aria-label="新建项目">
-            <Plus className="h-4 w-4" />
-          </Button>
-        </div>
-
-        <Button className="mb-4 w-full" variant="secondary">
-          <Plus className="h-4 w-4" />
-          新建项目
-        </Button>
-
-        <nav className="space-y-2" aria-label="项目列表">
-          <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-            <Folder className="h-3.5 w-3.5" />
-            项目列表
-          </div>
-          {projectItems.map((project) => (
-            <button
-              key={project.name}
-              className={cn(
-                "w-full rounded-lg border p-3 text-left transition hover:border-primary/60",
-                project.active ? "border-primary bg-primary/[0.07]" : "border-border bg-background"
-              )}
-            >
-              <div className="flex items-start gap-3">
-                <FolderOpen className={cn("mt-0.5 h-4 w-4", project.active ? "text-primary" : "text-muted-foreground")} />
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold">{project.name}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">{project.meta}</div>
-                </div>
-              </div>
-            </button>
-          ))}
-        </nav>
-
-        <div className="mt-5 rounded-lg border border-border p-3">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-medium text-muted-foreground">Render Budget</span>
-            <span className="font-semibold">$12.80</span>
-          </div>
-          <Progress value={44} className="mt-3" />
-          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-            <span>Quality</span>
-            <span className="text-right text-foreground">High</span>
-            <span>Fallback</span>
-            <span className="text-right text-foreground">Enabled</span>
-          </div>
-        </div>
-
-        <button className="mt-auto flex w-full items-center gap-3 rounded-lg border border-border bg-background p-3 text-left text-sm text-muted-foreground transition hover:border-primary/60 hover:text-foreground">
-          <Trash2 className="h-4 w-4" />
-          回收站
-        </button>
-      </div>
-    </aside>
-  );
-}
-
 function WorkspaceSummary({
   finishedScenes,
   totalScenes,
@@ -1147,34 +1113,35 @@ function WorkspaceSummary({
   exportFormat: string;
 }) {
   return (
-    <div className="grid gap-4 md:grid-cols-3">
-      <Card>
-        <CardContent className="flex items-center justify-between">
+    <div className="grid gap-3 md:grid-cols-3">
+      <Card className="border-violet-500/20 bg-gradient-to-br from-violet-500/10 to-transparent">
+        <CardContent className="flex items-center justify-between py-4">
           <div>
-            <div className="text-xs text-muted-foreground">Scenes</div>
-            <div className="mt-1 text-2xl font-semibold">
-              {finishedScenes}/{totalScenes}
+            <div className="text-[11px] text-muted-foreground">分镜完成</div>
+            <div className="mt-1 text-2xl font-semibold tabular-nums">
+              {finishedScenes}
+              <span className="text-lg text-muted-foreground">/{totalScenes}</span>
             </div>
           </div>
-          <Clapperboard className="h-5 w-5 text-primary" />
+          <Clapperboard className="h-5 w-5 text-violet-400" />
         </CardContent>
       </Card>
-      <Card>
-        <CardContent className="flex items-center justify-between">
+      <Card className="border-fuchsia-500/20 bg-gradient-to-br from-fuchsia-500/10 to-transparent">
+        <CardContent className="flex items-center justify-between py-4">
           <div>
-            <div className="text-xs text-muted-foreground">Render Progress</div>
-            <div className="mt-1 text-2xl font-semibold">{renderProgress}%</div>
+            <div className="text-[11px] text-muted-foreground">生成进度</div>
+            <div className="mt-1 text-2xl font-semibold tabular-nums">{renderProgress}%</div>
           </div>
-          <MonitorPlay className="h-5 w-5 text-violet-600" />
+          <MonitorPlay className="h-5 w-5 text-fuchsia-400" />
         </CardContent>
       </Card>
-      <Card>
-        <CardContent className="flex items-center justify-between">
+      <Card className="border-amber-500/15 bg-gradient-to-br from-amber-500/8 to-transparent">
+        <CardContent className="flex items-center justify-between py-4">
           <div>
-            <div className="text-xs text-muted-foreground">Export Profile</div>
-            <div className="mt-1 break-words text-xl font-semibold sm:text-2xl">{exportFormat}</div>
+            <div className="text-[11px] text-muted-foreground">导出规格</div>
+            <div className="mt-1 break-words text-lg font-semibold sm:text-xl">{exportFormat}</div>
           </div>
-          <Scissors className="h-5 w-5 text-amber-600" />
+          <Scissors className="h-5 w-5 text-amber-400" />
         </CardContent>
       </Card>
     </div>
@@ -2206,14 +2173,14 @@ function ComposeWorkspace({
             <MetricPanel label="预计时长" value={`${Math.round(timelineSeconds)}s`} detail="按裁剪后时间轴" />
           </div>
           {localTimelineExport && (
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">
               <span>
                 本地合成文件已生成：{formatBytes(localTimelineExport.size)} · {Math.round(localTimelineExport.duration)}s · {localTimelineExport.createdAt}
               </span>
               <a
                 href={localTimelineExport.url}
                 download={localTimelineExport.fileName}
-                className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-emerald-700 px-3 text-xs font-medium text-white hover:bg-emerald-800"
+                className="inline-flex h-8 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 text-xs font-medium text-white hover:bg-emerald-500"
               >
                 <Download className="h-3.5 w-3.5" />
                 下载合成视频
