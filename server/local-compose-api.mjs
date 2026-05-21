@@ -171,13 +171,26 @@ async function hasAudioTrack(filePath) {
 
 function getTargetSize(payload) {
   const vertical = payload.ratio !== "16:9";
-  const high = String(payload.exportProfile || "").includes("1080");
+  const profile = String(payload.exportProfile || "");
 
-  if (vertical) {
-    return high ? { width: 1080, height: 1920 } : { width: 720, height: 1280 };
+  if (profile.includes("8K")) {
+    return vertical ? { width: 4320, height: 7680 } : { width: 7680, height: 4320 };
+  }
+  if (profile.includes("4K")) {
+    return vertical ? { width: 2160, height: 3840 } : { width: 3840, height: 2160 };
+  }
+  if (profile.includes("2K")) {
+    return vertical ? { width: 1440, height: 2560 } : { width: 2560, height: 1440 };
+  }
+  if (profile.includes("1080")) {
+    return vertical ? { width: 1080, height: 1920 } : { width: 1920, height: 1080 };
   }
 
-  return high ? { width: 1920, height: 1080 } : { width: 1280, height: 720 };
+  if (vertical) {
+    return { width: 720, height: 1280 };
+  }
+
+  return { width: 1280, height: 720 };
 }
 
 function safeDuration(scene) {

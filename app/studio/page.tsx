@@ -72,6 +72,7 @@ type LocalComposeStatus = import("@/lib/types").LocalComposeStatus;
 type LocalVideoClip = RuntimeVideoClip;
 type LocalTimelineExport = RuntimeTimelineExport;
 type StudioScene = ReturnType<typeof useStudioStore.getState>["scenes"][number];
+type ExportProfile = ComposeSettings["exportProfile"];
 
 const pipelineSteps: Array<{
   id: StudioStep;
@@ -100,6 +101,31 @@ const sceneStatusTone: Record<SceneStatus, "neutral" | "green" | "amber" | "red"
   done: "green",
   failed: "red"
 };
+
+const exportProfiles: Array<{ value: ExportProfile; label: string; horizontal: string; vertical: string }> = [
+  { value: "MP4 720P", label: "MP4 720P（高清）", horizontal: "1280×720", vertical: "720×1280" },
+  { value: "MP4 1080P", label: "MP4 1080P（全高清）", horizontal: "1920×1080", vertical: "1080×1920" },
+  { value: "MP4 2K", label: "MP4 2K（超清）", horizontal: "2560×1440", vertical: "1440×2560" },
+  { value: "MP4 4K", label: "MP4 4K（超高清）", horizontal: "3840×2160", vertical: "2160×3840" },
+  { value: "MP4 8K", label: "MP4 8K（实验）", horizontal: "7680×4320", vertical: "4320×7680" }
+];
+
+function getExportDimensions(profile: string, ratio: PreviewRatio) {
+  const vertical = ratio !== "16:9";
+  if (profile.includes("8K")) {
+    return vertical ? { width: 4320, height: 7680 } : { width: 7680, height: 4320 };
+  }
+  if (profile.includes("4K")) {
+    return vertical ? { width: 2160, height: 3840 } : { width: 3840, height: 2160 };
+  }
+  if (profile.includes("2K")) {
+    return vertical ? { width: 1440, height: 2560 } : { width: 2560, height: 1440 };
+  }
+  if (profile.includes("1080")) {
+    return vertical ? { width: 1080, height: 1920 } : { width: 1920, height: 1080 };
+  }
+  return vertical ? { width: 720, height: 1280 } : { width: 1280, height: 720 };
+}
 
 const scriptStatusLabel: Record<"idle" | "generating" | "ready", string> = {
   idle: "待生成",
@@ -464,10 +490,21 @@ async function composeLocalTimeline({
     throw new Error(`${apiError ? `${apiError} ` : ""}当前浏览器不支持 MP4 录制编码，请使用线上 MP4 合成服务或最新版本 Chrome / Edge。`);
   }
 
-  const isVertical = settings.ratio === "9:16";
-  const isHigh = settings.exportProfile.includes("1080");
-  const canvasWidth = isVertical ? (isHigh ? 1080 : 720) : isHigh ? 1920 : 1280;
-  const canvasHeight = isVertical ? (isHigh ? 1920 : 1280) : isHigh ? 1080 : 720;
+  const { width: canvasWidth, height: canvasHeight } = getExportDimensions(
+    settings.exportProfile,
+    settings.ratio
+  );
+  const pixelCount = canvasWidth * canvasHeight;
+  const videoBitsPerSecond =
+    pixelCount >= 7680 * 4320
+      ? 60_000_000
+      : pixelCount >= 3840 * 2160
+        ? 35_000_000
+        : pixelCount >= 2560 * 1440
+          ? 18_000_000
+          : pixelCount >= 1920 * 1080
+            ? 8_000_000
+            : 4_500_000;
   const canvas = document.createElement("canvas");
   canvas.width = canvasWidth;
   canvas.height = canvasHeight;
@@ -493,7 +530,7 @@ async function composeLocalTimeline({
 
   const recorder = new MediaRecorder(stream, {
     mimeType,
-    videoBitsPerSecond: isHigh ? 8_000_000 : 4_500_000
+    videoBitsPerSecond
   });
   const chunks: Blob[] = [];
   const stopped = new Promise<Blob>((resolve) => {
@@ -2124,6 +2161,7 @@ function ComposeWorkspace({
   const previewProgress = orderedScenes.length
     ? Math.round(((activePreviewIndex + 1) / orderedScenes.length) * 100)
     : 0;
+  const exportDimension = getExportDimensions(composeSettings.exportProfile, composeSettings.ratio);
 
   useEffect(() => {
     setPreviewSceneIndex((index) => Math.min(index, Math.max(orderedScenes.length - 1, 0)));
@@ -2299,9 +2337,15 @@ function ComposeWorkspace({
                   onUpdateComposeSettings({ exportProfile: event.target.value as ComposeSettings["exportProfile"] })
                 }
               >
-                <option>MP4 1080P</option>
-                <option>MP4 720P</option>
+                {exportProfiles.map((profile) => (
+                  <option key={profile.value} value={profile.value}>
+                    {profile.label}
+                  </option>
+                ))}
               </Select>
+              <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs leading-5 text-muted-foreground">
+                当前输出：{exportDimension.width}×{exportDimension.height}
+              </div>
               <label className="flex h-9 items-center justify-between gap-3 rounded-md border border-border bg-surface px-3 text-sm">
                 <span>水印</span>
                 <input
@@ -2695,8 +2739,11 @@ function ExportWorkspace({
               onChange={(event) => onExportFormatChange(event.target.value)}
               className="mt-2"
             >
+              <option>720p MP4</option>
               <option>1080p MP4</option>
-              <option>4K 专业母版</option>
+              <option>2K MP4</option>
+              <option>4K MP4</option>
+              <option>8K MP4</option>
               <option>9:16 社媒套装</option>
               <option>1:1 广告套装</option>
             </Select>
@@ -3265,8 +3312,11 @@ function PropertyPanel({
                     value={exportFormat}
                     onChange={(event) => onExportFormatChange(event.target.value)}
                   >
+                    <option>720p MP4</option>
                     <option>1080p MP4</option>
-                    <option>4K 专业母版</option>
+                    <option>2K MP4</option>
+                    <option>4K MP4</option>
+                    <option>8K MP4</option>
                     <option>9:16 社媒套装</option>
                     <option>1:1 广告套装</option>
                   </Select>

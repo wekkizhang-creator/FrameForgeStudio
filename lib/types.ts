@@ -179,7 +179,7 @@ export interface RecordComposeSettings {
   subtitleColor: string;
   ttsModel: string;
   ttsVoice: string;
-  exportProfile: "MP4 1080P" | "MP4 720P";
+  exportProfile: "MP4 720P" | "MP4 1080P" | "MP4 2K" | "MP4 4K" | "MP4 8K";
   watermark: boolean;
 }
 
