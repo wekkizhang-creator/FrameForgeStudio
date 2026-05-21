@@ -1069,6 +1069,9 @@ export default function StudioPage() {
                 onUpdateSceneTrim={updateSceneTrim}
                 onUpdateSceneTransition={updateSceneTransition}
                 onReorderTimeline={reorderTimeline}
+                onUpdateScene={updateScene}
+                onAppendScene={appendScene}
+                onDeleteScene={deleteScene}
                 onUploadLocalVideo={handleLocalVideoUpload}
                 onRemoveLocalVideo={handleRemoveLocalVideo}
                 onMergeExport={handleMergeExport}
@@ -2052,6 +2055,9 @@ function ComposeWorkspace({
   onUpdateSceneTrim,
   onUpdateSceneTransition,
   onReorderTimeline,
+  onUpdateScene,
+  onAppendScene,
+  onDeleteScene,
   onUploadLocalVideo,
   onRemoveLocalVideo,
   onMergeExport,
@@ -2073,6 +2079,12 @@ function ComposeWorkspace({
   onUpdateSceneTrim: (sceneId: string, patch: Partial<{ start: number; end: number }>) => void;
   onUpdateSceneTransition: (sceneId: string, transition: TimelineTransition) => void;
   onReorderTimeline: (fromIndex: number, toIndex: number) => void;
+  onUpdateScene: (
+    sceneId: string,
+    patch: Partial<Pick<ReturnType<typeof useStudioStore.getState>["scenes"][number], "narration">>
+  ) => void;
+  onAppendScene: () => void;
+  onDeleteScene: (sceneId: string) => void;
   onUploadLocalVideo: (sceneId: string, file: File | null | undefined) => void;
   onRemoveLocalVideo: (sceneId: string) => void;
   onMergeExport: () => void;
@@ -2333,34 +2345,105 @@ function ComposeWorkspace({
                           移除
                         </Button>
                       )}
+                      {orderedScenes.length > 1 && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onRemoveLocalVideo(scene.id);
+                            onDeleteScene(scene.id);
+                          }}
+                        >
+                          删除片段
+                        </Button>
+                      )}
                     </div>
                   </div>
                 );
               })}
+              <button
+                type="button"
+                onClick={onAppendScene}
+                className="flex w-48 shrink-0 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-primary/45 bg-primary/5 p-4 text-sm font-medium text-primary transition hover:bg-primary/10"
+              >
+                <Plus className="h-5 w-5" />
+                添加视频位
+                <span className="text-xs font-normal text-muted-foreground">添加到视频轨末尾</span>
+              </button>
             </div>
           </TimelineTrack>
 
           <TimelineTrack label="音频轨" icon={<Music className="h-4 w-4" />}>
-            <button
+            <div
               onClick={() => onSelectComposeElement({ type: "audio" })}
               className={cn(
-                "grid w-full gap-3 rounded-lg border p-3 text-left md:grid-cols-[180px_1fr_160px]",
+                "grid w-full gap-3 rounded-lg border p-3 text-left md:grid-cols-[180px_minmax(0,1fr)_220px]",
                 composeSelection.type === "audio" ? "border-primary bg-primary/[0.06]" : "border-border bg-surface"
               )}
             >
-              <div className="text-sm font-semibold">
-                {composeSettings.bgmMode === "upload" ? composeSettings.bgmFileName || "上传背景音乐" : composeSettings.musicLibraryTrack}
+              <div>
+                <div className="text-xs text-muted-foreground">音频来源</div>
+                <Select
+                  className="mt-2 h-8"
+                  value={composeSettings.bgmMode}
+                  onChange={(event) =>
+                    onUpdateComposeSettings({ bgmMode: event.target.value as ComposeSettings["bgmMode"] })
+                  }
+                >
+                  <option value="library">音乐库</option>
+                  <option value="upload">上传音频</option>
+                </Select>
               </div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Volume2 className="h-3.5 w-3.5" />
-                音量 {composeSettings.bgmVolume}%
+              <div>
+                <div className="text-xs text-muted-foreground">音频素材</div>
+                {composeSettings.bgmMode === "library" ? (
+                  <Select
+                    className="mt-2 h-8"
+                    value={composeSettings.musicLibraryTrack}
+                    onChange={(event) => onUpdateComposeSettings({ musicLibraryTrack: event.target.value })}
+                  >
+                    <option>温暖创作者节拍</option>
+                    <option>干净产品节奏</option>
+                    <option>柔和纪实铺底</option>
+                  </Select>
+                ) : (
+                  <label className="mt-2 flex h-8 cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 text-xs hover:bg-muted">
+                    <span className="truncate">{composeSettings.bgmFileName || "选择音频文件"}</span>
+                    <Upload className="h-3.5 w-3.5 text-muted-foreground" />
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      className="sr-only"
+                      onChange={(event) =>
+                        onUpdateComposeSettings({ bgmFileName: event.target.files?.[0]?.name ?? "" })
+                      }
+                    />
+                  </label>
+                )}
               </div>
-              <Progress value={composeSettings.bgmVolume} />
-            </button>
+              <div>
+                <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1">
+                    <Volume2 className="h-3.5 w-3.5" />
+                    音量
+                  </span>
+                  <span>{composeSettings.bgmVolume}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={composeSettings.bgmVolume}
+                  onChange={(event) => onUpdateComposeSettings({ bgmVolume: Number(event.target.value) })}
+                  className="w-full accent-teal-700"
+                />
+              </div>
+            </div>
           </TimelineTrack>
 
           <TimelineTrack label="字幕轨" icon={<Captions className="h-4 w-4" />}>
-            <button
+            <div
               onClick={() => onSelectComposeElement({ type: "subtitle" })}
               className={cn(
                 "flex w-full gap-2 overflow-x-auto rounded-lg border p-3 text-left",
@@ -2368,11 +2451,16 @@ function ComposeWorkspace({
               )}
             >
               {orderedScenes.map((scene) => (
-                <span key={scene.id} className="min-w-56 rounded-md border border-border bg-background p-2 text-xs leading-5">
-                  #{scene.index} {scene.narration}
-                </span>
+                <label key={scene.id} className="min-w-72 rounded-md border border-border bg-background p-2 text-xs leading-5">
+                  <span className="mb-1 block font-semibold text-foreground">字幕 #{scene.index}</span>
+                  <textarea
+                    value={scene.narration}
+                    onChange={(event) => onUpdateScene(scene.id, { narration: event.target.value })}
+                    className="min-h-20 w-full resize-none rounded-md border border-border bg-surface px-2 py-1 text-xs leading-5 text-foreground outline-none focus:border-primary/50"
+                  />
+                </label>
               ))}
-            </button>
+            </div>
           </TimelineTrack>
 
           <TimelineTrack label="配音轨" icon={<Mic2 className="h-4 w-4" />}>
