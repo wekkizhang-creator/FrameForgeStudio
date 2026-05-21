@@ -42,7 +42,7 @@ scp @SshArgs "$ProjectRoot\server\frameforge-compose.service" "${SshTarget}:/tmp
 scp @SshArgs "$ProjectRoot\server\nginx-frameforge-ip.conf" "${SshTarget}:/tmp/frameforge-ip.conf"
 
 Write-Host ">> Activating release and services..."
-$ActivateCmd = "set -e; ln -sfn $RemoteRelease $RemoteBase/current; cp /tmp/frameforge-ip.conf /etc/nginx/conf.d/frameforge-ip.conf; chmod 755 $RemoteBase/api/local-compose-api.mjs; if [ ! -f /etc/systemd/system/frameforge-compose.service ]; then cp /tmp/frameforge-compose.service /etc/systemd/system/frameforge-compose.service && systemctl daemon-reload && systemctl enable frameforge-compose; fi; systemctl restart frameforge-compose; nginx -t && systemctl reload nginx; echo DEPLOY_OK; readlink -f $RemoteBase/current; systemctl is-active frameforge-compose || true"
+$ActivateCmd = "set -e; find $RemoteRelease -type d -exec chmod 755 {} \;; find $RemoteRelease -type f -exec chmod 644 {} \;; ln -sfn $RemoteRelease $RemoteBase/current; cp /tmp/frameforge-ip.conf /etc/nginx/conf.d/frameforge-ip.conf; chmod 755 $RemoteBase/api/local-compose-api.mjs; if [ ! -f /etc/systemd/system/frameforge-compose.service ]; then cp /tmp/frameforge-compose.service /etc/systemd/system/frameforge-compose.service && systemctl daemon-reload && systemctl enable frameforge-compose; fi; systemctl restart frameforge-compose; nginx -t && systemctl reload nginx; echo DEPLOY_OK; readlink -f $RemoteBase/current; systemctl is-active frameforge-compose || true"
 ssh @SshArgs $SshTarget $ActivateCmd
 
 Write-Host ""
