@@ -2091,6 +2091,7 @@ function ComposeWorkspace({
   onGoExport: () => void;
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [previewSceneIndex, setPreviewSceneIndex] = useState(0);
   const orderedScenes = composeSettings.timelineOrder
     .map((sceneId) => scenes.find((scene) => scene.id === sceneId))
     .filter((scene): scene is ReturnType<typeof useStudioStore.getState>["scenes"][number] => Boolean(scene));
@@ -2098,7 +2099,11 @@ function ComposeWorkspace({
     composeSelection.type === "video"
       ? scenes.find((scene) => scene.id === composeSelection.sceneId)
       : orderedScenes[0];
-  const previewScene = selectedScene ?? orderedScenes[0] ?? scenes[0];
+  const selectedSceneIndex = selectedScene
+    ? Math.max(0, orderedScenes.findIndex((scene) => scene.id === selectedScene.id))
+    : 0;
+  const activePreviewIndex = composeSettings.previewPlaying ? previewSceneIndex : selectedSceneIndex;
+  const previewScene = orderedScenes[activePreviewIndex] ?? selectedScene ?? orderedScenes[0] ?? scenes[0];
   const previewClip = previewScene ? localVideoClips[previewScene.id] : undefined;
   const uploadedClipCount = Object.keys(localVideoClips).length;
   const timelineSeconds = orderedScenes.reduce((total, scene) => {
@@ -2106,6 +2111,23 @@ function ComposeWorkspace({
     const trim = composeSettings.trims[scene.id] ?? { start: 0, end: clip?.duration ?? scene.duration };
     return total + Math.max(1, trim.end - trim.start);
   }, 0);
+  const previewProgress = orderedScenes.length
+    ? Math.round(((activePreviewIndex + 1) / orderedScenes.length) * 100)
+    : 0;
+
+  useEffect(() => {
+    setPreviewSceneIndex((index) => Math.min(index, Math.max(orderedScenes.length - 1, 0)));
+  }, [orderedScenes.length]);
+
+  useEffect(() => {
+    if (!composeSettings.previewPlaying || orderedScenes.length <= 1) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setPreviewSceneIndex((index) => (index + 1) % orderedScenes.length);
+    }, 2600);
+    return () => window.clearInterval(timer);
+  }, [composeSettings.previewPlaying, orderedScenes.length]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -2133,17 +2155,18 @@ function ComposeWorkspace({
           </div>
         </CardHeader>
         <CardContent>
-          <div
-            role="button"
-            tabIndex={0}
-            className="mx-auto block w-full max-w-4xl text-left"
-            onClick={() => onSelectComposeElement({ type: "preview" })}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                onSelectComposeElement({ type: "preview" });
-              }
-            }}
-          >
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+            <div
+              role="button"
+              tabIndex={0}
+              className="block w-full text-left"
+              onClick={() => onSelectComposeElement({ type: "preview" })}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  onSelectComposeElement({ type: "preview" });
+                }
+              }}
+            >
             <div
               className={cn(
                 "frame-noise relative mx-auto overflow-hidden rounded-lg border border-white/40 shadow-soft",
@@ -2197,20 +2220,95 @@ function ComposeWorkspace({
                 <span className="h-1.5 flex-1 rounded-full bg-white/32">
                   <span
                     className="block h-full rounded-full bg-white transition-all"
-                    style={{ width: `${exportStatus === "merging" ? exportProgress : 38}%` }}
+                    style={{ width: `${exportStatus === "merging" ? exportProgress : previewProgress}%` }}
                   />
                 </span>
               </div>
             </div>
-          </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <MetricPanel label="本地视频" value={`${uploadedClipCount}/${orderedScenes.length}`} detail="已上传片段" />
-            <MetricPanel
-              label="合成状态"
-              value={localComposeStatus === "ready" ? "可下载" : localComposeStatus === "merging" ? "合成中" : localComposeStatus === "error" ? "失败" : "待合成"}
-              detail="浏览器本地渲染"
-            />
-            <MetricPanel label="预计时长" value={`${Math.round(timelineSeconds)}s`} detail="按裁剪后时间轴" />
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-background p-3">
+              <div className="text-xs text-muted-foreground">
+                预览片段 {Math.min(activePreviewIndex + 1, orderedScenes.length || 1)}/{orderedScenes.length || 1}
+                {previewScene ? ` · #${previewScene.index} ${previewScene.title}` : ""}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={orderedScenes.length <= 1}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setPreviewSceneIndex((index) => (index - 1 + orderedScenes.length) % orderedScenes.length);
+                  }}
+                >
+                  上一段
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setPreviewSceneIndex(activePreviewIndex);
+                    onUpdateComposeSettings({ previewPlaying: !composeSettings.previewPlaying });
+                  }}
+                >
+                  <Play className="h-3.5 w-3.5 fill-current" />
+                  {composeSettings.previewPlaying ? "暂停预览" : "播放预览"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={orderedScenes.length <= 1}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setPreviewSceneIndex((index) => (index + 1) % orderedScenes.length);
+                  }}
+                >
+                  下一段
+                </Button>
+              </div>
+            </div>
+            </div>
+
+            <div className="flex flex-col gap-3 rounded-xl border border-border bg-background p-4">
+              <div>
+                <div className="text-sm font-semibold">合成操作</div>
+                <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                  {uploadedClipCount}/{orderedScenes.length} 个本地视频 · 预计 {Math.round(timelineSeconds)}s
+                </div>
+              </div>
+              <Select
+                value={composeSettings.exportProfile}
+                onChange={(event) =>
+                  onUpdateComposeSettings({ exportProfile: event.target.value as ComposeSettings["exportProfile"] })
+                }
+              >
+                <option>MP4 1080P</option>
+                <option>MP4 720P</option>
+              </Select>
+              <label className="flex h-9 items-center justify-between gap-3 rounded-md border border-border bg-surface px-3 text-sm">
+                <span>水印</span>
+                <input
+                  type="checkbox"
+                  checked={composeSettings.watermark}
+                  onChange={(event) => onUpdateComposeSettings({ watermark: event.target.checked })}
+                  className="h-4 w-4 accent-teal-700"
+                />
+              </label>
+              <Button onClick={onMergeExport} disabled={localComposeStatus === "merging" || (!allScenesDone && exportStatus !== "ready")}>
+                {exportStatus === "merging" || localComposeStatus === "merging" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Scissors className="h-4 w-4" />
+                )}
+                {uploadedClipCount ? "合成本地视频" : "一键合成"}
+              </Button>
+              <Button variant="outline" onClick={onGoExport}>
+                <Download className="h-4 w-4" />
+                前往导出
+              </Button>
+              <div className="rounded-lg border border-border bg-surface p-3 text-xs leading-5 text-muted-foreground">
+                状态：{localComposeStatus === "ready" ? "可下载" : localComposeStatus === "merging" ? "合成中" : localComposeStatus === "error" ? "失败" : "待合成"}
+              </div>
+            </div>
           </div>
           {localTimelineExport && (
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">
@@ -2481,53 +2579,6 @@ function ComposeWorkspace({
               </div>
             </button>
           </TimelineTrack>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              onClick={() => onUpdateComposeSettings({ previewPlaying: !composeSettings.previewPlaying })}
-            >
-              <Play className="h-4 w-4 fill-current" />
-              实时预览
-            </Button>
-            <Button onClick={onMergeExport} disabled={localComposeStatus === "merging" || (!allScenesDone && exportStatus !== "ready")}>
-              {exportStatus === "merging" || localComposeStatus === "merging" ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Scissors className="h-4 w-4" />
-              )}
-              {uploadedClipCount ? "合成本地视频" : "一键合成"}
-            </Button>
-            <Button variant="outline" onClick={onGoExport}>
-              <Download className="h-4 w-4" />
-              前往导出
-            </Button>
-          </div>
-
-          <div className="grid gap-2 sm:grid-cols-[150px_auto] sm:items-center">
-            <Select
-              value={composeSettings.exportProfile}
-              onChange={(event) =>
-                onUpdateComposeSettings({ exportProfile: event.target.value as ComposeSettings["exportProfile"] })
-              }
-            >
-              <option>MP4 1080P</option>
-              <option>MP4 720P</option>
-            </Select>
-            <label className="flex h-9 items-center justify-between gap-3 rounded-md border border-border bg-surface px-3 text-sm">
-              <span>水印</span>
-              <input
-                type="checkbox"
-                checked={composeSettings.watermark}
-                onChange={(event) => onUpdateComposeSettings({ watermark: event.target.checked })}
-                className="h-4 w-4 accent-teal-700"
-              />
-            </label>
-          </div>
         </CardContent>
       </Card>
 
