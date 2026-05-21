@@ -77,10 +77,10 @@ const pipelineSteps: Array<{
   label: string;
   description: string;
 }> = [
-  { id: "script", number: "①", label: "脚本生成", description: "LLM Script" },
-  { id: "storyboard", number: "②", label: "分镜视频", description: "Shots & Models" },
-  { id: "compose", number: "③", label: "视频合成", description: "Merge Timeline" },
-  { id: "export", number: "④", label: "导出", description: "Delivery" }
+  { id: "script", number: "①", label: "脚本生成", description: "大模型脚本" },
+  { id: "storyboard", number: "②", label: "分镜视频", description: "镜头与模型" },
+  { id: "compose", number: "③", label: "视频合成", description: "时间轴合成" },
+  { id: "export", number: "④", label: "导出", description: "交付文件" }
 ];
 
 const sceneStatusLabel: Record<SceneStatus, string> = {
@@ -97,6 +97,18 @@ const sceneStatusTone: Record<SceneStatus, "neutral" | "green" | "amber" | "red"
   rendering: "purple",
   done: "green",
   failed: "red"
+};
+
+const scriptStatusLabel: Record<"idle" | "generating" | "ready", string> = {
+  idle: "待生成",
+  generating: "生成中",
+  ready: "已生成"
+};
+
+const exportStatusLabel: Record<"idle" | "merging" | "ready", string> = {
+  idle: "待导出",
+  merging: "导出中",
+  ready: "已就绪"
 };
 
 function metricFormat(value: number, unit = "") {
@@ -156,7 +168,7 @@ async function composeLocalTimelineViaApi({
   onProgress: (progress: number) => void;
 }) {
   if (window.location.protocol === "file:") {
-    throw new Error("当前是本地 file 预览，无法连接 MP4 合成服务。请使用线上地址或启动带 API 的预览服务。");
+    throw new Error("当前是本地文件预览，无法连接 MP4 合成服务。请使用线上地址或启动带接口服务的预览环境。");
   }
 
   const totalSeconds = getTimelineDuration(scenes, clips, settings);
@@ -1221,7 +1233,7 @@ function ScriptWorkspace({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const styleOptions = ["科普", "剧情", "口播", "Vlog", "广告", "剧情反转"];
+  const styleOptions = ["科普", "剧情", "口播", "生活记录", "广告", "剧情反转"];
 
   return (
     <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
@@ -1232,7 +1244,7 @@ function ScriptWorkspace({
             <div className="mt-1 text-xs text-muted-foreground">输入主题与模型参数，生成结构化分镜</div>
           </div>
           <Badge tone={scriptStatus === "ready" ? "green" : scriptStatus === "generating" ? "purple" : "neutral"}>
-            {scriptStatus === "ready" ? "ready" : scriptStatus}
+            {scriptStatusLabel[scriptStatus]}
           </Badge>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1317,7 +1329,7 @@ function ScriptWorkspace({
                 <option>抖音</option>
                 <option>视频号</option>
                 <option>小红书</option>
-                <option>YouTube Shorts</option>
+                <option>海外短视频</option>
               </Select>
             </div>
             <div>
@@ -1345,7 +1357,7 @@ function ScriptWorkspace({
             >
               {llmModels.map((model) => (
                 <option key={model.id} value={model.id}>
-                  {model.name} · 约 {model.estimatedTokens.toLocaleString("zh-CN")} Token
+                  {model.name} · 约 {model.estimatedTokens.toLocaleString("zh-CN")} 词元
                 </option>
               ))}
             </Select>
@@ -1363,7 +1375,7 @@ function ScriptWorkspace({
               <div className="space-y-4 border-t border-border p-3">
                 <div>
                   <div className="flex items-center justify-between">
-                    <Label>Temperature</Label>
+                    <Label>创意温度</Label>
                     <span className="text-xs font-semibold">{temperature.toFixed(2)}</span>
                   </div>
                   <input
@@ -1377,7 +1389,7 @@ function ScriptWorkspace({
                   />
                 </div>
                 <div>
-                  <Label htmlFor="max-tokens">Max Tokens</Label>
+                  <Label htmlFor="max-tokens">最大词元数</Label>
                   <Input
                     id="max-tokens"
                     type="number"
@@ -1389,7 +1401,7 @@ function ScriptWorkspace({
                   />
                 </div>
                 <div>
-                  <Label htmlFor="system-prompt">System Prompt</Label>
+                  <Label htmlFor="system-prompt">系统提示词</Label>
                   <Textarea
                     id="system-prompt"
                     value={systemPrompt}
@@ -1404,7 +1416,7 @@ function ScriptWorkspace({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Route className="h-3.5 w-3.5" />
-              Model config injected by Admin Console
+              模型配置由运营后台统一注入
             </div>
             <Button onClick={onGenerateScript} disabled={scriptStatus === "generating" || brief.trim().length === 0}>
               {scriptStatus === "generating" ? (
@@ -1480,7 +1492,7 @@ function ScriptWorkspace({
                           <div className="truncate text-sm font-semibold">{scene.title}</div>
                         </div>
                         <div className="mt-1 text-xs text-muted-foreground">
-                          Visual Prompt will be sent to video generation
+                          画面提示词会发送到视频生成模型
                         </div>
                       </div>
                     </div>
@@ -1506,7 +1518,7 @@ function ScriptWorkspace({
 
                   <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)_96px]">
                     <div>
-                      <Label>画面描述 (Visual Prompt)</Label>
+                      <Label>画面描述（视觉提示词）</Label>
                       {editing ? (
                         <Textarea
                           value={scene.prompt}
@@ -1672,13 +1684,13 @@ function StoryboardWorkspace({
                       </span>
                       <span className="text-sm font-semibold">{scene.title}</span>
                     </div>
-                    <div className="mt-1 text-xs text-muted-foreground">来自 Step 1，可微调 Visual Prompt</div>
+                    <div className="mt-1 text-xs text-muted-foreground">来自第 1 步，可微调视觉提示词</div>
                   </div>
                   {renderStatusBadge(scene.status, scene.progress)}
                 </div>
 
                 <div>
-                  <Label>画面描述 (Visual Prompt)</Label>
+                  <Label>画面描述（视觉提示词）</Label>
                   <Textarea
                     value={scene.prompt}
                     onChange={(event) => onUpdateScene(scene.id, { prompt: event.target.value })}
@@ -1714,7 +1726,7 @@ function StoryboardWorkspace({
                   >
                     <VideoFrame
                       thumbnailClass={selectedVersion.thumbnailClass}
-                      label={`VERSION ${selectedVersion.label}`}
+                      label={`版本 ${selectedVersion.label}`}
                       className="shadow-soft"
                     />
                   </button>
@@ -1750,7 +1762,9 @@ function StoryboardWorkspace({
                     <div className="text-sm font-semibold">视频生成配置</div>
                     <div className="text-xs text-muted-foreground">独立任务 · {selectedModel.vendor}</div>
                   </div>
-                  <Badge tone={selectedModel.status === "online" ? "green" : "amber"}>{selectedModel.status}</Badge>
+                  <Badge tone={selectedModel.status === "online" ? "green" : "amber"}>
+                    {selectedModel.status === "online" ? "在线" : selectedModel.status === "degraded" ? "降级" : "离线"}
+                  </Badge>
                 </div>
 
                 <div className="space-y-4">
@@ -1987,7 +2001,7 @@ function PreviewModal({
           <div>
             <div className="text-sm font-semibold">视频预览 · #{scene.index}</div>
             <div className="mt-1 text-xs text-muted-foreground">
-              Version {selectedVersion?.label ?? "-"} · {videoModels.find((model) => model.id === scene.modelId)?.name}
+              版本 {selectedVersion?.label ?? "-"} · {videoModels.find((model) => model.id === scene.modelId)?.name}
             </div>
           </div>
           <Button size="icon" variant="ghost" onClick={onClose} aria-label="关闭视频预览">
@@ -1997,7 +2011,7 @@ function PreviewModal({
         <div className="p-4">
           <VideoFrame
             thumbnailClass={selectedVersion?.thumbnailClass ?? scene.thumbnailClass}
-            label="VIDEO PREVIEW"
+            label="视频预览"
             className="shadow-soft"
           />
           <p className="mt-4 text-sm leading-6 text-muted-foreground">{scene.prompt}</p>
@@ -2073,7 +2087,7 @@ function ComposeWorkspace({
         <CardHeader className="flex flex-row items-center justify-between gap-3">
           <div>
             <CardTitle>视频合成</CardTitle>
-            <div className="mt-1 text-xs text-muted-foreground">简化轨道式时间轴，触发后端 ffmpeg 合成任务</div>
+            <div className="mt-1 text-xs text-muted-foreground">简化轨道式时间轴，触发后端视频合成任务</div>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -2128,7 +2142,7 @@ function ComposeWorkspace({
                   {composeSettings.ratio === "9:16" ? "1080×1920" : "1920×1080"}
                 </span>
                 <span className="rounded bg-white/20 px-2 py-1 text-[11px] font-medium text-white/90">
-                  {composeSettings.previewPlaying ? "LIVE PREVIEW" : "PAUSED"}
+                  {composeSettings.previewPlaying ? "实时预览" : "已暂停"}
                 </span>
               </div>
               <div className="absolute inset-0 z-10 grid grid-cols-3 grid-rows-3 opacity-25">
@@ -2200,7 +2214,7 @@ function ComposeWorkspace({
           <div>
             <CardTitle>时间轴</CardTitle>
             <div className="mt-1 text-xs text-muted-foreground">
-              {orderedScenes.length} clips · {timelineSeconds}s · 视频/音频/字幕/配音轨
+              {orderedScenes.length} 个片段 · {timelineSeconds}s · 视频/音频/字幕/配音轨
             </div>
           </div>
           <Badge tone={allScenesDone ? "green" : "amber"}>
@@ -2321,7 +2335,7 @@ function ComposeWorkspace({
               )}
             >
               <div className="text-sm font-semibold">
-                {composeSettings.bgmMode === "upload" ? composeSettings.bgmFileName || "BGM 上传" : composeSettings.musicLibraryTrack}
+                {composeSettings.bgmMode === "upload" ? composeSettings.bgmFileName || "上传背景音乐" : composeSettings.musicLibraryTrack}
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Volume2 className="h-3.5 w-3.5" />
@@ -2356,7 +2370,7 @@ function ComposeWorkspace({
               )}
             >
               <div>
-                <div className="text-xs text-muted-foreground">TTS 模型</div>
+                <div className="text-xs text-muted-foreground">配音模型</div>
                 <div className="mt-1 text-sm font-semibold">{composeSettings.ttsModel}</div>
               </div>
               <div>
@@ -2419,7 +2433,7 @@ function ComposeWorkspace({
         <Card>
           <CardContent>
             <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
-              <span>{uploadedClipCount ? "浏览器本地视频合成" : "ffmpeg composition task"}</span>
+              <span>{uploadedClipCount ? "浏览器本地视频合成" : "后端合成任务"}</span>
               <span>{uploadedClipCount ? localComposeProgress : exportProgress}%</span>
             </div>
             <Progress value={uploadedClipCount ? localComposeProgress : exportProgress} />
@@ -2498,12 +2512,12 @@ function ExportWorkspace({
             <div className="mt-1 text-xs text-muted-foreground">选择交付规格并生成最终文件</div>
           </div>
           <Badge tone={exportStatus === "ready" ? "green" : exportStatus === "merging" ? "purple" : "neutral"}>
-            {exportStatus === "ready" ? "export ready" : exportStatus}
+            {exportStatusLabel[exportStatus]}
           </Badge>
         </CardHeader>
         <CardContent className="space-y-5">
           <div>
-            <Label htmlFor="export-format-main">Format</Label>
+            <Label htmlFor="export-format-main">导出格式</Label>
             <Select
               id="export-format-main"
               value={exportFormat}
@@ -2511,14 +2525,14 @@ function ExportWorkspace({
               className="mt-2"
             >
               <option>1080p MP4</option>
-              <option>4K ProRes</option>
-              <option>9:16 Social Pack</option>
-              <option>1:1 Ad Pack</option>
+              <option>4K 专业母版</option>
+              <option>9:16 社媒套装</option>
+              <option>1:1 广告套装</option>
             </Select>
           </div>
           <div>
             <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
-              <span>{localComposeStatus === "merging" ? "本地合成进度" : "Export Progress"}</span>
+              <span>{localComposeStatus === "merging" ? "本地合成进度" : "导出进度"}</span>
               <span>{localComposeStatus === "merging" ? localComposeProgress : exportProgress}%</span>
             </div>
             <Progress value={localComposeStatus === "merging" ? localComposeProgress : exportProgress} />
@@ -2565,9 +2579,9 @@ function ExportWorkspace({
           <div className="grid gap-3 md:grid-cols-2">
             {[
               ["合成视频", localTimelineExport ? `${localTimelineExport.mimeType} · ${formatBytes(localTimelineExport.size)}` : exportFormat],
-              ["Cover Frame", "PNG 1920x1080"],
-              ["Captions", "SRT + VTT"],
-              ["Social Cuts", "9:16 / 1:1"]
+              ["封面帧", "PNG 1920x1080"],
+              ["字幕文件", "SRT + VTT"],
+              ["社媒切片", "9:16 / 1:1"]
             ].map(([label, value]) => (
               <div key={label} className="rounded-lg border border-border bg-background p-4">
                 <div className="text-sm font-semibold">{label}</div>
@@ -2700,7 +2714,7 @@ function PropertyPanel({
               <CardContent className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-md border border-border bg-background p-3">
-                    <div className="text-xs text-muted-foreground">Token 消耗</div>
+                    <div className="text-xs text-muted-foreground">词元消耗</div>
                     <div className="mt-1 text-lg font-semibold">
                       {tokenUsage ? tokenUsage.toLocaleString("zh-CN") : "--"}
                     </div>
@@ -2739,13 +2753,13 @@ function PropertyPanel({
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <Label>Active Scene</Label>
+                  <Label>当前镜头</Label>
                   <div className="mt-2 rounded-md border border-border bg-background p-3 text-sm font-semibold">
                     S{activeScene.index} · {activeScene.title}
                   </div>
                 </div>
                 <div>
-                  <Label>Video Model</Label>
+                  <Label>视频模型</Label>
                   <Select
                     className="mt-2"
                     value={activeScene.modelId}
@@ -2759,17 +2773,17 @@ function PropertyPanel({
                   </Select>
                 </div>
                 <div>
-                  <Label>Prompt</Label>
+                  <Label>提示词</Label>
                   <p className="mt-2 rounded-md border border-border bg-background p-3 text-sm leading-6 text-muted-foreground">
                     {activeScene.prompt}
                   </p>
                 </div>
                 <div>
-                  <Label>Motion</Label>
+                  <Label>运动幅度</Label>
                   <input className="mt-3 w-full accent-teal-700" type="range" defaultValue={42} />
                 </div>
                 <div>
-                  <Label>Creativity</Label>
+                  <Label>创意强度</Label>
                   <input className="mt-3 w-full accent-violet-600" type="range" defaultValue={68} />
                 </div>
               </CardContent>
@@ -2926,7 +2940,7 @@ function PropertyPanel({
                 {composeSelection.type === "audio" && (
                   <>
                     <div>
-                      <Label>BGM 来源</Label>
+                      <Label>背景音乐来源</Label>
                       <Select
                         className="mt-2"
                         value={composeSettings.bgmMode}
@@ -2935,7 +2949,7 @@ function PropertyPanel({
                         }
                       >
                         <option value="library">音乐库选择</option>
-                        <option value="upload">BGM 上传</option>
+                        <option value="upload">上传背景音乐</option>
                       </Select>
                     </div>
                     {composeSettings.bgmMode === "library" ? (
@@ -2946,14 +2960,14 @@ function PropertyPanel({
                           value={composeSettings.musicLibraryTrack}
                           onChange={(event) => onUpdateComposeSettings({ musicLibraryTrack: event.target.value })}
                         >
-                          <option>Warm Creator Pulse</option>
-                          <option>Clean Product Beat</option>
-                          <option>Soft Documentary Bed</option>
+                          <option>温暖创作者节拍</option>
+                          <option>干净产品节奏</option>
+                          <option>柔和纪实铺底</option>
                         </Select>
                       </div>
                     ) : (
                       <label className="flex cursor-pointer items-center justify-between rounded-md border border-border p-3 text-sm">
-                        <span>{composeSettings.bgmFileName || "选择 BGM 文件"}</span>
+                        <span>{composeSettings.bgmFileName || "选择背景音乐文件"}</span>
                         <Upload className="h-4 w-4 text-muted-foreground" />
                         <input
                           type="file"
@@ -3037,15 +3051,15 @@ function PropertyPanel({
                 {composeSelection.type === "voice" && (
                   <>
                     <div>
-                      <Label>TTS 模型</Label>
+                        <Label>配音模型</Label>
                       <Select
                         className="mt-2"
                         value={composeSettings.ttsModel}
                         onChange={(event) => onUpdateComposeSettings({ ttsModel: event.target.value })}
                       >
-                        <option>Azure TTS</option>
-                        <option>ElevenLabs</option>
-                        <option>Volcengine TTS</option>
+                        <option>Azure 语音合成</option>
+                        <option>ElevenLabs 语音</option>
+                        <option>火山语音合成</option>
                       </Select>
                     </div>
                     <div>
@@ -3055,10 +3069,10 @@ function PropertyPanel({
                         value={composeSettings.ttsVoice}
                         onChange={(event) => onUpdateComposeSettings({ ttsVoice: event.target.value })}
                       >
-                        <option>zh-CN-Xiaoxiao</option>
-                        <option>zh-CN-Yunxi</option>
-                        <option>en-US-Aria</option>
-                        <option>Warm Narrator</option>
+                        <option>中文女声·晓晓</option>
+                        <option>中文男声·云希</option>
+                        <option>英文女声·Aria</option>
+                        <option>温暖旁白</option>
                       </Select>
                     </div>
                   </>
@@ -3074,16 +3088,16 @@ function PropertyPanel({
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <Label>Format</Label>
+                  <Label>导出格式</Label>
                   <Select
                     className="mt-2"
                     value={exportFormat}
                     onChange={(event) => onExportFormatChange(event.target.value)}
                   >
                     <option>1080p MP4</option>
-                    <option>4K ProRes</option>
-                    <option>9:16 Social Pack</option>
-                    <option>1:1 Ad Pack</option>
+                    <option>4K 专业母版</option>
+                    <option>9:16 社媒套装</option>
+                    <option>1:1 广告套装</option>
                   </Select>
                 </div>
                 <label className="flex items-center justify-between rounded-md border border-border p-3 text-sm">
@@ -3116,14 +3130,16 @@ function PropertyPanel({
                         <div className="text-sm font-semibold">{model.name}</div>
                         <div className="text-xs text-muted-foreground">{model.region}</div>
                       </div>
-                      <Badge tone={model.status === "online" ? "green" : "amber"}>{model.status}</Badge>
+                      <Badge tone={model.status === "online" ? "green" : "amber"}>
+                        {model.status === "online" ? "在线" : model.status === "degraded" ? "降级" : "离线"}
+                      </Badge>
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                      <span className="text-muted-foreground">Quality</span>
+                      <span className="text-muted-foreground">质量</span>
                       <span className="col-span-2 text-right font-semibold">{model.qualityScore}</span>
-                      <span className="text-muted-foreground">Latency</span>
+                      <span className="text-muted-foreground">延迟</span>
                       <span className="col-span-2 text-right font-semibold">{metricFormat(model.latencyMs, "ms")}</span>
-                      <span className="text-muted-foreground">Cost</span>
+                      <span className="text-muted-foreground">成本</span>
                       <span className="col-span-2 text-right font-semibold">${model.costPerMinute}/min</span>
                     </div>
                   </div>

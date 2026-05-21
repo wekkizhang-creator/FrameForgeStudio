@@ -89,7 +89,7 @@ export function SchemaParameterForm({
             ) : (
               <FileCode2 className="h-3 w-3" />
             )}
-            Draft-07
+            草案校验
           </Badge>
         </div>
       </div>
@@ -121,7 +121,7 @@ export function SchemaParameterForm({
       <div className="rounded-lg border border-border bg-foreground p-3 text-white">
         <div className="flex items-center justify-between gap-3">
           <div className="text-xs font-semibold uppercase tracking-[0.08em] text-white/60">
-            Vendor API Body
+            厂商接口请求体
           </div>
           <Badge tone="neutral">{requestPayload.endpoint}</Badge>
         </div>
@@ -177,7 +177,7 @@ function SchemaField({
                     : "border-border bg-surface text-muted-foreground"
                 )}
               >
-                <span>{field.value ? "Enabled" : "Disabled"}</span>
+                <span>{field.value ? "已开启" : "已关闭"}</span>
                 <span
                   className={cn(
                     "h-5 w-9 rounded-full p-0.5 transition",

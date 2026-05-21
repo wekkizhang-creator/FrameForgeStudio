@@ -10,7 +10,7 @@ export const defaultVideoParameterSchemas: Record<string, ModelParameterSchema> 
   seedance: {
     $schema: "http://json-schema.org/draft-07/schema#",
     $id: "schema.video.seedance.v1",
-    title: "Seedance 参数 Schema",
+    title: "Seedance 参数结构",
     description: "字节 Seedance 写实与运镜增强模型",
     type: "object",
     required: ["resolution", "duration", "camera_motion"],
@@ -63,7 +63,7 @@ export const defaultVideoParameterSchemas: Record<string, ModelParameterSchema> 
       },
       seed: {
         type: "integer",
-        title: "Seed",
+        title: "随机种子",
         default: 8234,
         minimum: 0,
         maximum: 99999,
@@ -90,7 +90,7 @@ export const defaultVideoParameterSchemas: Record<string, ModelParameterSchema> 
   hailuo: {
     $schema: "http://json-schema.org/draft-07/schema#",
     $id: "schema.video.hailuo.v1",
-    title: "Hailuo 参数 Schema",
+    title: "Hailuo 参数结构",
     description: "海螺人物、情绪与口播强化模型",
     type: "object",
     required: ["resolution", "duration", "prompt_optimizer"],
@@ -133,7 +133,7 @@ export const defaultVideoParameterSchemas: Record<string, ModelParameterSchema> 
       },
       prompt_optimizer: {
         type: "boolean",
-        title: "Prompt Optimizer",
+        title: "提示词优化器",
         default: true,
         "ui:widget": "switch",
         "ui:apiField": "prompt_optimizer",
@@ -162,7 +162,7 @@ export const defaultVideoParameterSchemas: Record<string, ModelParameterSchema> 
   kling: {
     $schema: "http://json-schema.org/draft-07/schema#",
     $id: "schema.video.kling.v1",
-    title: "Kling 参数 Schema",
+    title: "Kling 参数结构",
     description: "可灵长时长与复杂运动模型",
     type: "object",
     required: ["resolution", "duration", "cfg_scale", "camera_control"],
@@ -199,7 +199,7 @@ export const defaultVideoParameterSchemas: Record<string, ModelParameterSchema> 
       },
       cfg_scale: {
         type: "number",
-        title: "CFG Scale",
+        title: "提示遵循强度",
         default: 0.65,
         minimum: 0,
         maximum: 1,
@@ -218,8 +218,8 @@ export const defaultVideoParameterSchemas: Record<string, ModelParameterSchema> 
       },
       negative_prompt: {
         type: "string",
-        title: "Negative Prompt",
-        default: "low quality, blurry, distorted hands",
+        title: "负向提示词",
+        default: "低质量、模糊、手部畸变",
         "ui:widget": "textarea",
         "ui:apiField": "negative_prompt"
       },
@@ -319,17 +319,17 @@ export function parseParameterSchemaDraft(draft: string) {
   try {
     const schema = JSON.parse(draft) as ModelParameterSchema;
     if (schema.type !== "object" || !schema.properties || typeof schema.properties !== "object") {
-      return { schema: null, error: "Schema 必须是 object，并包含 properties" };
+      return { schema: null, error: "参数结构必须是对象，并包含 properties" };
     }
     if (!schema["ui:api"]?.endpoint || !schema["ui:api"]?.promptField) {
-      return { schema: null, error: "Schema 需要配置 ui:api.endpoint 与 ui:api.promptField" };
+      return { schema: null, error: "参数结构需要配置 ui:api.endpoint 与 ui:api.promptField" };
     }
     ajv.compile(schema);
     return { schema, error: null };
   } catch (error) {
     return {
       schema: null,
-      error: error instanceof Error ? error.message : "JSON Schema 解析失败"
+      error: error instanceof Error ? error.message : "JSON 参数结构解析失败"
     };
   }
 }

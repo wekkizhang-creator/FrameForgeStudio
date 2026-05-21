@@ -42,13 +42,13 @@ export function createDefaultComposeSettings(sceneIds: string[] = ["scene-01"]):
     transitions,
     bgmMode: "library",
     bgmFileName: "",
-    musicLibraryTrack: "Warm Creator Pulse",
+    musicLibraryTrack: "温暖创作者节拍",
     bgmVolume: 62,
     subtitlePosition: "bottom",
     subtitleFontSize: 42,
     subtitleColor: "#ffffff",
-    ttsModel: "Azure TTS",
-    ttsVoice: "zh-CN-Xiaoxiao",
+    ttsModel: "Azure 语音合成",
+    ttsVoice: "中文女声·晓晓",
     exportProfile: "MP4 1080P",
     watermark: true
   };
