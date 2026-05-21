@@ -2158,9 +2158,6 @@ function ComposeWorkspace({
     const trim = composeSettings.trims[scene.id] ?? { start: 0, end: clip?.duration ?? scene.duration };
     return total + Math.max(1, trim.end - trim.start);
   }, 0);
-  const previewProgress = orderedScenes.length
-    ? Math.round(((activePreviewIndex + 1) / orderedScenes.length) * 100)
-    : 0;
   const exportDimension = getExportDimensions(composeSettings.exportProfile, composeSettings.ratio);
 
   useEffect(() => {
@@ -2208,7 +2205,12 @@ function ComposeWorkspace({
               role="button"
               tabIndex={0}
               className="block w-full text-left"
-              onClick={() => onSelectComposeElement({ type: "preview" })}
+              onClick={(event) => {
+                if (event.target instanceof HTMLVideoElement) {
+                  return;
+                }
+                onSelectComposeElement({ type: "preview" });
+              }}
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {
                   onSelectComposeElement({ type: "preview" });
@@ -2242,7 +2244,7 @@ function ComposeWorkspace({
                   </p>
                 </div>
               )}
-              <div className="absolute inset-x-4 top-4 z-10 flex items-center justify-between">
+              <div className="pointer-events-none absolute inset-x-4 top-4 z-10 flex items-center justify-between">
                 <span className="rounded bg-black/32 px-2 py-1 text-[11px] font-medium text-white/90">
                   {composeSettings.ratio === "9:16" ? "1080×1920" : "1920×1080"}
                 </span>
@@ -2254,7 +2256,7 @@ function ComposeWorkspace({
                 <>
                   <div
                     className={cn(
-                      "absolute inset-x-6 z-20 rounded-md bg-black/36 px-4 py-2 text-center text-white",
+                      "pointer-events-none absolute inset-x-6 z-20 rounded-md bg-black/36 px-4 py-2 text-center text-white",
                       composeSettings.subtitlePosition === "top" && "top-16",
                       composeSettings.subtitlePosition === "middle" && "top-1/2 -translate-y-1/2",
                       composeSettings.subtitlePosition === "bottom" && "bottom-16"
@@ -2265,17 +2267,6 @@ function ComposeWorkspace({
                     }}
                   >
                     {previewScene?.narration ?? "自动字幕预览"}
-                  </div>
-                  <div className="absolute inset-x-6 bottom-5 z-20 flex items-center gap-3">
-                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-foreground">
-                      <Play className="h-4 w-4 fill-current" />
-                    </span>
-                    <span className="h-1.5 flex-1 rounded-full bg-white/32">
-                      <span
-                        className="block h-full rounded-full bg-white transition-all"
-                        style={{ width: `${exportStatus === "merging" ? exportProgress : previewProgress}%` }}
-                      />
-                    </span>
                   </div>
                 </>
               )}
