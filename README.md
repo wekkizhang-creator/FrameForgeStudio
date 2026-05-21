@@ -116,6 +116,29 @@ npm run build
 
 若需服务端合成，请在同一机器部署 `local-compose-api.mjs` 并反向代理到前端可访问的路径。
 
+### 一键部署到云服务器（163.7.4.158）
+
+项目内已记录服务器路径（见 `server/nginx-frameforge-ip.conf`）：
+
+| 路径 | 用途 |
+|------|------|
+| `/var/www/frameforge/current` | 静态站点（`out/` 产物） |
+| `/var/www/frameforge/api` | 本地合成 API |
+| `http://163.7.4.158/api/` | Nginx 反代到 `:4174` |
+
+本机需已配置 SSH 密钥 `~/.ssh/frameforge_deploy`（与 HTMLWorkbench 同机 `root@163.7.4.158`）。
+
+```powershell
+# Windows
+npm run build
+powershell -ExecutionPolicy Bypass -File .\scripts\deploy-to-server.ps1
+```
+
+部署后访问：
+
+- 工作台：http://163.7.4.158/studio
+- 运营后台：http://163.7.4.158/admin
+
 ## 分支说明
 
 | 分支 | 说明 |
