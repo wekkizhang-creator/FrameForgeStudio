@@ -41,6 +41,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/form";
 import { Progress } from "@/components/ui/progress";
 import { SchemaParameterForm } from "@/components/schema-parameter-form";
+import { AuthGate } from "@/components/studio/auth-gate";
 import { ProjectSidebar } from "@/components/studio/project-sidebar";
 import { VideoFrame } from "@/components/video-frame";
 import { getDurationSecondsFromConfig } from "@/lib/model-parameter-schema";
@@ -54,6 +55,7 @@ import { useModelSchemaStore } from "@/store/model-schema-store";
 import type { ComposeSettings } from "@/store/record-assets-store";
 import { useRecordAssetsStore } from "@/store/record-assets-store";
 import { useStudioStore } from "@/store/studio-store";
+import { useUserAuthStore } from "@/store/user-auth-store";
 import type { RuntimeTimelineExport, RuntimeVideoClip } from "@/lib/types";
 
 type StudioStep = "script" | "storyboard" | "compose" | "export";
@@ -563,6 +565,8 @@ export default function StudioPage() {
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
   const [composeSelection, setComposeSelection] = useState<ComposeSelection>({ type: "preview" });
   const activeRecordId = useProjectStore((s) => s.activeRecordId);
+  const currentUser = useUserAuthStore((state) => state.currentUser());
+  const logout = useUserAuthStore((state) => state.logout);
   const {
     localVideoClips,
     localTimelineExport,
@@ -887,6 +891,7 @@ export default function StudioPage() {
   };
 
   return (
+    <AuthGate>
     <main className="min-h-screen bg-background text-foreground">
       <header className="fixed inset-x-0 top-0 z-40 border-b border-border/70 bg-background/80 px-4 py-3 backdrop-blur-xl lg:h-[72px] lg:px-6 lg:py-0">
         <div className="flex h-full flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -896,7 +901,7 @@ export default function StudioPage() {
             </div>
             <div>
               <div className="text-sm font-semibold">
-                <span className="text-gradient">即梦工坊</span>
+                <span className="text-gradient">光影造物</span>
               </div>
               <div className="text-[11px] text-muted-foreground">脚本 · 分镜 · 合成 · 导出</div>
             </div>
@@ -953,9 +958,17 @@ export default function StudioPage() {
           </nav>
 
           <div className="hidden min-w-[200px] items-center justify-end gap-2 lg:flex">
+            {currentUser && (
+              <div className="max-w-[140px] truncate rounded-lg border border-border/70 bg-elevated px-3 py-1.5 text-xs text-muted-foreground">
+                {currentUser.name}
+              </div>
+            )}
             <Button variant="outline" size="sm" onClick={resetAll}>
               <RefreshCcw className="h-3.5 w-3.5" />
               重置当前记录
+            </Button>
+            <Button variant="ghost" size="sm" onClick={logout}>
+              退出登录
             </Button>
             <Link
               href="/admin"
@@ -1110,6 +1123,7 @@ export default function StudioPage() {
         />
       </div>
     </main>
+    </AuthGate>
   );
 }
 

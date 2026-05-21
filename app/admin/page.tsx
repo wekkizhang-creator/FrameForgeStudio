@@ -597,7 +597,7 @@ export default function AdminPage() {
               <CloudCog className="h-4 w-4" />
             </div>
             <div>
-              <div className="text-sm font-semibold">即梦工坊管理后台</div>
+              <div className="text-sm font-semibold">光影造物管理后台</div>
               <div className="text-xs text-muted-foreground">接口接入、模型路由与运营控制</div>
             </div>
           </div>
