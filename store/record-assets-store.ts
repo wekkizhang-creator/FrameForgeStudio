@@ -127,16 +127,25 @@ export const useRecordAssetsStore = create<RecordAssetsState>((set, get) => ({
       return;
     }
 
-    revokeClips(prev.localVideoClips);
-    revokeExport(prev.localTimelineExport);
-    set({ isLoading: true, loadedRecordId: record.id });
-
     const assets = record.assets ?? createDefaultRecordAssets(record.state.scenes.map((s) => s.id));
     const sceneIds = record.state.scenes.map((s) => s.id);
     const composeSettings: ComposeSettings = {
       ...(assets.composeSettings ?? createDefaultComposeSettings(sceneIds)),
       previewPlaying: false
     };
+
+    revokeClips(prev.localVideoClips);
+    revokeExport(prev.localTimelineExport);
+    set({
+      isLoading: true,
+      loadedRecordId: record.id,
+      localVideoClips: {},
+      localTimelineExport: null,
+      composeSettings,
+      localComposeStatus: assets.localComposeStatus,
+      localComposeProgress: assets.localComposeProgress,
+      localComposeError: assets.localComposeError
+    });
 
     const clips: Record<string, RuntimeVideoClip> = {};
     try {

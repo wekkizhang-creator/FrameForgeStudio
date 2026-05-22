@@ -417,6 +417,9 @@ async function persistAssetsFromRuntime(captureCover = false) {
   if (!projectStore.hydrated || !projectStore.activeRecordId) {
     return;
   }
+  if (useRecordAssetsStore.getState().isLoading) {
+    return;
+  }
   const recordId = projectStore.activeRecordId;
   const { assets, coverThumbnail } = await useRecordAssetsStore.getState().flushForRecord(recordId);
   projectStore.updateActiveRecordAssets(
@@ -425,7 +428,10 @@ async function persistAssetsFromRuntime(captureCover = false) {
   );
 }
 
-useRecordAssetsStore.subscribe(() => {
+useRecordAssetsStore.subscribe((state) => {
+  if (state.isLoading) {
+    return;
+  }
   if (assetsSyncTimer) {
     clearTimeout(assetsSyncTimer);
   }

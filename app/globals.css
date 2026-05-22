@@ -3,26 +3,26 @@
 @tailwind utilities;
 
 :root {
-  --background: 240 8% 4%;
-  --foreground: 0 0% 96%;
-  --surface: 240 6% 8%;
-  --sidebar: 240 10% 3%;
-  --elevated: 240 6% 11%;
-  --muted: 240 5% 14%;
-  --muted-foreground: 240 4% 58%;
-  --border: 240 5% 18%;
-  --input: 240 5% 20%;
-  --ring: 280 85% 62%;
-  --primary: 280 78% 58%;
+  --background: 240 10% 3%;
+  --foreground: 220 18% 96%;
+  --surface: 240 9% 7%;
+  --sidebar: 240 14% 4%;
+  --elevated: 240 8% 10%;
+  --muted: 240 7% 15%;
+  --muted-foreground: 230 8% 62%;
+  --border: 235 8% 18%;
+  --input: 235 8% 20%;
+  --ring: 263 82% 64%;
+  --primary: 263 82% 64%;
   --primary-foreground: 0 0% 100%;
-  --accent: 330 82% 58%;
+  --accent: 190 86% 52%;
   --accent-foreground: 0 0% 100%;
   --destructive: 0 72% 52%;
   --destructive-foreground: 0 0% 100%;
   --success: 155 55% 42%;
   --warning: 38 88% 52%;
-  --gradient-brand: linear-gradient(135deg, #8b5cf6 0%, #d946ef 48%, #f472b6 100%);
-  --gradient-surface: linear-gradient(180deg, hsl(240 8% 6%) 0%, hsl(240 10% 3%) 100%);
+  --gradient-brand: linear-gradient(135deg, #8b5cf6 0%, #22d3ee 56%, #a7f3d0 100%);
+  --gradient-surface: linear-gradient(180deg, hsl(240 11% 5%) 0%, hsl(240 12% 3%) 100%);
 }
 
 * {
@@ -59,10 +59,9 @@ textarea {
 
 .panel-grid {
   background-image:
-    radial-gradient(circle at 50% 0%, rgba(139, 92, 246, 0.08), transparent 42%),
-    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
-  background-size: 100% 100%, 32px 32px, 32px 32px;
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: 36px 36px, 36px 36px;
 }
 
 .frame-noise {

@@ -62,9 +62,9 @@ function RecordCover({
       className={cn(
         "flex h-12 w-[4.5rem] shrink-0 items-center justify-center rounded-lg ring-1 ring-border/50",
         hasExport
-          ? "bg-gradient-to-br from-emerald-500/25 to-violet-500/20"
+          ? "bg-gradient-to-br from-emerald-400/20 to-cyan-400/15"
           : hasClips
-            ? "bg-gradient-to-br from-violet-500/20 to-fuchsia-500/15"
+            ? "bg-gradient-to-br from-violet-400/18 to-cyan-400/12"
             : "bg-muted/40"
       )}
     >
@@ -146,7 +146,7 @@ export function ProjectSidebar() {
     <aside className="hidden border-r border-border/80 bg-[hsl(var(--sidebar))] lg:block">
       <div className="flex h-full flex-col p-4">
         <div className="mb-4 flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-glow">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient text-white shadow-glow">
             <Sparkles className="h-4 w-4" />
           </div>
           <div>
@@ -316,13 +316,17 @@ export function ProjectSidebar() {
                 const meta = formatRecordMeta(record.state);
                 const hasClips = record.assets.clips.length > 0;
                 const hasExport = Boolean(record.assets.timelineExport);
+                const generatedVideos = record.state.scenes.reduce((total, scene) => {
+                  const doneVersions = scene.versions.filter((version) => version.status === "done").length;
+                  return total + Math.max(doneVersions, scene.status === "done" ? 1 : 0);
+                }, 0);
                 return (
                   <div
                     key={record.id}
                     className={cn(
                       "group rounded-xl border transition",
                       isActive
-                        ? "border-fuchsia-500/35 bg-gradient-to-br from-violet-500/12 to-fuchsia-500/8"
+                        ? "border-cyan-400/30 bg-gradient-to-br from-violet-500/12 to-cyan-400/8 shadow-glow-sm"
                         : "border-border/50 bg-[hsl(var(--elevated))]/40 hover:border-border"
                     )}
                   >
@@ -348,6 +352,11 @@ export function ProjectSidebar() {
                           {hasClips && (
                             <span className="rounded bg-violet-500/15 px-1 py-0.5 text-violet-300">
                               {record.assets.clips.length} 个本地分镜
+                            </span>
+                          )}
+                          {generatedVideos > 0 && (
+                            <span className="rounded bg-cyan-400/15 px-1 py-0.5 text-cyan-200">
+                              {generatedVideos} 个生成视频
                             </span>
                           )}
                           {hasExport && (

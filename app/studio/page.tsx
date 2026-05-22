@@ -602,6 +602,15 @@ export default function StudioPage() {
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
   const [composeSelection, setComposeSelection] = useState<ComposeSelection>({ type: "preview" });
   const activeRecordId = useProjectStore((s) => s.activeRecordId);
+  const recordContext = useProjectStore((state) => {
+    const project = state.projects.find((item) => item.id === state.activeProjectId);
+    const record = project?.records.find((item) => item.id === state.activeRecordId);
+    return {
+      projectName: project?.name ?? "未选择项目",
+      recordName: record?.name ?? "未选择记录",
+      recordUpdatedAt: record?.updatedAt
+    };
+  });
   const currentUser = useUserAuthStore((state) => state.currentUser());
   const logout = useUserAuthStore((state) => state.logout);
   const {
@@ -687,6 +696,15 @@ export default function StudioPage() {
   const renderProgress = scenes.length
     ? Math.round(scenes.reduce((total, scene) => total + scene.progress, 0) / scenes.length)
     : 0;
+  const generatedVideoCount = useMemo(
+    () =>
+      scenes.reduce((total, scene) => {
+        const doneVersions = scene.versions.filter((version) => version.status === "done").length;
+        return total + Math.max(doneVersions, scene.status === "done" ? 1 : 0);
+      }, 0),
+    [scenes]
+  );
+  const activeRecordSyncRef = useRef(activeRecordId);
 
   const completedByStep = useMemo(
     () => ({
@@ -723,6 +741,37 @@ export default function StudioPage() {
       setActiveStep("compose");
     }
   }, [activeStep, allScenesDone, exportStatus]);
+
+  useEffect(() => {
+    if (!activeRecordId || activeRecordSyncRef.current === activeRecordId) {
+      return;
+    }
+
+    activeRecordSyncRef.current = activeRecordId;
+    const timer = window.setTimeout(() => {
+      if (useProjectStore.getState().activeRecordId !== activeRecordId) {
+        return;
+      }
+
+      const snapshot = useStudioStore.getState();
+      const hasGeneratedVideos = snapshot.scenes.some(
+        (scene) => scene.status !== "idle" || scene.versions.length > 0
+      );
+
+      if (snapshot.exportStatus === "ready" || snapshot.phase === "complete") {
+        setActiveStep("export");
+      } else if (snapshot.phase === "export") {
+        setActiveStep("compose");
+      } else if (snapshot.phase === "rendering" || snapshot.phase === "storyboard" || hasGeneratedVideos) {
+        setActiveStep("storyboard");
+      } else {
+        setActiveStep("script");
+      }
+      setComposeSelection({ type: "preview" });
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [activeRecordId]);
 
   useEffect(() => {
     localVideoClipsRef.current = localVideoClips;
@@ -1030,6 +1079,17 @@ export default function StudioPage() {
 
         <section className="panel-grid min-w-0 px-4 py-5 sm:px-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-5">
+            <RecordContextBar
+              projectName={recordContext.projectName}
+              recordName={recordContext.recordName}
+              recordUpdatedAt={recordContext.recordUpdatedAt}
+              assetsLoading={assetsLoading}
+              generatedVideoCount={generatedVideoCount}
+              localClipCount={Object.keys(localVideoClips).length}
+              hasTimelineExport={Boolean(localTimelineExport)}
+              exportFileName={localTimelineExport?.fileName}
+            />
+
             <WorkspaceSummary
               finishedScenes={finishedScenes}
               totalScenes={scenes.length}
@@ -1167,6 +1227,101 @@ export default function StudioPage() {
   );
 }
 
+function RecordContextBar({
+  projectName,
+  recordName,
+  recordUpdatedAt,
+  assetsLoading,
+  generatedVideoCount,
+  localClipCount,
+  hasTimelineExport,
+  exportFileName
+}: {
+  projectName: string;
+  recordName: string;
+  recordUpdatedAt?: string;
+  assetsLoading: boolean;
+  generatedVideoCount: number;
+  localClipCount: number;
+  hasTimelineExport: boolean;
+  exportFileName?: string;
+}) {
+  const updatedLabel = recordUpdatedAt
+    ? new Intl.DateTimeFormat("zh-CN", {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      }).format(new Date(recordUpdatedAt))
+    : "未同步";
+
+  const syncItems = [
+    `${generatedVideoCount} 个生成视频`,
+    `${localClipCount} 个本地素材`,
+    hasTimelineExport ? "MP4 成片已同步" : "未合成成片"
+  ];
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-white/8 bg-[linear-gradient(135deg,hsl(var(--elevated))_0%,hsl(var(--surface))_58%,rgba(34,211,238,0.06)_100%)] shadow-soft">
+      <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-1">
+              <Layers3 className="h-3 w-3" />
+              {projectName}
+            </span>
+            <ChevronRight className="h-3.5 w-3.5" />
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/12 px-2 py-1 text-primary">
+              <Film className="h-3 w-3" />
+              {recordName}
+            </span>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <h2 className="max-w-[520px] truncate text-xl font-semibold tracking-normal text-foreground">
+              {recordName}
+            </h2>
+            <Badge tone={hasTimelineExport ? "green" : generatedVideoCount > 0 ? "purple" : "neutral"}>
+              {hasTimelineExport ? "已合成" : generatedVideoCount > 0 ? "生成中资产" : "草稿"}
+            </Badge>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+            {syncItems.map((item) => (
+              <span key={item} className="rounded-md border border-border/60 bg-background/40 px-2 py-1">
+                {item}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex min-w-[220px] flex-col items-start gap-2 rounded-xl border border-border/60 bg-background/40 p-3 md:items-end">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            {assetsLoading ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                正在同步生成记录素材
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                记录素材已同步
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <Clock3 className="h-3 w-3" />
+            更新于 {updatedLabel}
+          </div>
+          {exportFileName && (
+            <div className="max-w-[260px] truncate text-[11px] text-emerald-300">
+              {exportFileName}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WorkspaceSummary({
   finishedScenes,
   totalScenes,
@@ -1180,7 +1335,7 @@ function WorkspaceSummary({
 }) {
   return (
     <div className="grid gap-3 md:grid-cols-3">
-      <Card className="border-violet-500/20 bg-gradient-to-br from-violet-500/10 to-transparent">
+      <Card className="border-cyan-400/15 bg-gradient-to-br from-cyan-400/10 to-transparent">
         <CardContent className="flex items-center justify-between py-4">
           <div>
             <div className="text-[11px] text-muted-foreground">分镜完成</div>
@@ -1189,16 +1344,16 @@ function WorkspaceSummary({
               <span className="text-lg text-muted-foreground">/{totalScenes}</span>
             </div>
           </div>
-          <Clapperboard className="h-5 w-5 text-violet-400" />
+          <Clapperboard className="h-5 w-5 text-cyan-300" />
         </CardContent>
       </Card>
-      <Card className="border-fuchsia-500/20 bg-gradient-to-br from-fuchsia-500/10 to-transparent">
+      <Card className="border-violet-400/15 bg-gradient-to-br from-violet-400/10 to-transparent">
         <CardContent className="flex items-center justify-between py-4">
           <div>
             <div className="text-[11px] text-muted-foreground">生成进度</div>
             <div className="mt-1 text-2xl font-semibold tabular-nums">{renderProgress}%</div>
           </div>
-          <MonitorPlay className="h-5 w-5 text-fuchsia-400" />
+          <MonitorPlay className="h-5 w-5 text-violet-300" />
         </CardContent>
       </Card>
       <Card className="border-amber-500/15 bg-gradient-to-br from-amber-500/8 to-transparent">
