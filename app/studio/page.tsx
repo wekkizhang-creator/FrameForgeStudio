@@ -1220,6 +1220,7 @@ export default function StudioPage() {
           onToggle={() => setPropertiesCollapsed((value) => !value)}
           onExportFormatChange={setExportFormat}
           onUpdateSceneModel={updateSceneModel}
+          onUpdateScene={updateScene}
         />
       </div>
     </main>
@@ -2976,7 +2977,8 @@ function PropertyPanel({
   onUploadLocalVideo,
   onRemoveLocalVideo,
   onExportFormatChange,
-  onUpdateSceneModel
+  onUpdateSceneModel,
+  onUpdateScene
 }: {
   activeStep: StudioStep;
   collapsed: boolean;
@@ -3005,6 +3007,10 @@ function PropertyPanel({
   onRemoveLocalVideo: (sceneId: string) => void;
   onExportFormatChange: (value: string) => void;
   onUpdateSceneModel: (sceneId: string, modelId: string) => void;
+  onUpdateScene: (
+    sceneId: string,
+    patch: Partial<Pick<StudioScene, "title" | "prompt" | "narration" | "duration">>
+  ) => void;
 }) {
   const selectedLlmModel = llmModels.find((model) => model.id === llmModelId) ?? llmModels[0];
   const storyboardJson = JSON.stringify(
@@ -3128,9 +3134,11 @@ function PropertyPanel({
                 </div>
                 <div>
                   <Label>提示词</Label>
-                  <p className="mt-2 rounded-md border border-border bg-background p-3 text-sm leading-6 text-muted-foreground">
-                    {activeScene.prompt}
-                  </p>
+                  <Textarea
+                    className="mt-2 min-h-32"
+                    value={activeScene.prompt}
+                    onChange={(event) => onUpdateScene(activeScene.id, { prompt: event.target.value })}
+                  />
                 </div>
                 <div>
                   <Label>运动幅度</Label>
