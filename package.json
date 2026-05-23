@@ -8,6 +8,7 @@
     "lint": "next lint",
     "preview": "node scripts/preview-server.mjs",
     "compose-api": "node server/local-compose-api.mjs",
+    "verify:flow": "node scripts/verify-flow.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

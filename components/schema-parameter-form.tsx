@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
-import { CheckCircle2, FileCode2, Upload } from "lucide-react";
+import { CheckCircle2, FileCode2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/form";
@@ -17,8 +17,7 @@ import {
 import type {
   ModelParameterPropertySchema,
   ModelParameterSchema,
-  VideoGenerationConfig,
-  VideoGenerationValue
+  VideoGenerationConfig
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -102,12 +101,6 @@ export function SchemaParameterForm({
             property={property}
             values={watched}
             control={form.control}
-            setValue={(nextValue) =>
-              form.setValue(fieldKey, nextValue, {
-                shouldDirty: true,
-                shouldValidate: true
-              })
-            }
           />
         ))}
       </div>
@@ -137,14 +130,12 @@ function SchemaField({
   fieldKey,
   property,
   values,
-  control,
-  setValue
+  control
 }: {
   fieldKey: string;
   property: ModelParameterPropertySchema;
   values: VideoGenerationConfig;
   control: ReturnType<typeof useForm<VideoGenerationConfig>>["control"];
-  setValue: (value: VideoGenerationValue) => void;
 }) {
   const disabledOptions = getDisabledEnumValues(property, values);
   const ruleReason = getActiveOptionRuleReason(property, values);
@@ -221,20 +212,15 @@ function SchemaField({
 
           if (widget === "upload") {
             return (
-              <div className="mt-2 flex gap-2">
+              <div className="mt-2">
                 <Input
                   value={String(field.value ?? "")}
                   onChange={(event) => field.onChange(event.target.value)}
-                  placeholder="未上传"
+                  placeholder="请输入已上传素材 URL"
                 />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setValue(`mock://${fieldKey}-${Date.now()}.png`)}
-                >
-                  <Upload className="h-3.5 w-3.5" />
-                  上传
-                </Button>
+                <div className="mt-2 text-xs leading-5 text-muted-foreground">
+                  素材上传 API 未接入时，不生成临时假地址；请填写真实可访问的图片 URL。
+                </div>
               </div>
             );
           }
