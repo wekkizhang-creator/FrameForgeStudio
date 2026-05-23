@@ -1572,7 +1572,7 @@ function CreationPathSwitch({
   onChange: (path: CreationPath) => void;
 }) {
   return (
-    <div className="flex w-full max-w-3xl items-center gap-1 overflow-x-auto rounded-2xl border border-border/60 bg-elevated/80 p-1 shadow-soft">
+    <div className="grid w-full max-w-3xl grid-cols-3 gap-1 rounded-2xl border border-border/60 bg-elevated/80 p-1 shadow-soft">
       {creationPaths.map((path) => {
         const PathIcon = path.icon;
         const active = activePath === path.id;
@@ -1582,10 +1582,10 @@ function CreationPathSwitch({
             type="button"
             onClick={() => onChange(path.id)}
             className={cn(
-              "group flex min-w-fit flex-1 items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-primary/40",
+              "group grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-primary/40 lg:px-3",
               active
-                ? "bg-primary/15 text-primary shadow-glow-sm"
-                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                ? "bg-[linear-gradient(135deg,rgba(124,58,237,0.24),rgba(34,211,238,0.10))] text-primary shadow-glow-sm ring-1 ring-primary/20"
+                : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
             )}
           >
             <span
@@ -1598,9 +1598,9 @@ function CreationPathSwitch({
             >
               <PathIcon className="h-4 w-4" />
             </span>
-            <span className="min-w-0">
-              <span className="block whitespace-nowrap font-semibold">{path.label}</span>
-              <span className="hidden whitespace-nowrap text-[11px] text-muted-foreground xl:block">{path.description}</span>
+            <span className="min-w-0 leading-tight">
+              <span className="block truncate font-semibold">{path.label}</span>
+              <span className="hidden truncate text-[11px] text-muted-foreground xl:block">{path.description}</span>
             </span>
           </button>
         );
@@ -1621,17 +1621,17 @@ function PipelineStepNav({
   onStepSelect: (step: StudioStep) => void;
 }) {
   return (
-    <div className="flex w-full items-center overflow-x-auto rounded-2xl border border-border/60 bg-elevated/70 px-2 py-1.5 shadow-soft">
+    <div className="grid w-full grid-cols-2 gap-1 rounded-2xl border border-border/60 bg-elevated/70 p-1.5 shadow-soft sm:grid-cols-4">
       {pipelineSteps.map((step, index) => {
         const completed = completedByStep[step.id];
         const running = runningByStep[step.id] || (activeStep === step.id && !completed);
         return (
-          <div key={step.id} className="flex min-w-fit flex-1 items-center">
+          <div key={step.id} className="min-w-0">
             <button
               type="button"
               onClick={() => onStepSelect(step.id)}
               className={cn(
-                "flex h-10 w-full items-center gap-2 rounded-xl px-3 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-primary/40",
+                "flex h-10 w-full min-w-0 items-center gap-2 rounded-xl px-2.5 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-primary/40 lg:px-3",
                 activeStep === step.id
                   ? "bg-primary/15 text-primary shadow-glow-sm"
                   : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
@@ -1655,16 +1655,13 @@ function PipelineStepNav({
                   step.number
                 )}
               </span>
-              <span>
-                <span className="block whitespace-nowrap font-semibold">{step.label}</span>
-                <span className="block whitespace-nowrap text-[11px] text-muted-foreground">
+              <span className="min-w-0">
+                <span className="block truncate font-semibold">{step.label}</span>
+                <span className="hidden truncate text-[11px] text-muted-foreground lg:block">
                   {step.description}
                 </span>
               </span>
             </button>
-            {index < pipelineSteps.length - 1 && (
-              <ChevronRight className="mx-1 h-4 w-4 shrink-0 text-muted-foreground" />
-            )}
           </div>
         );
       })}
