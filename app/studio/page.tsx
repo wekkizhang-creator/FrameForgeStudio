@@ -905,6 +905,52 @@ export default function StudioPage() {
     return sceneId;
   };
 
+  const prepareUploadVideoScenes = (files: File[]) => {
+    const baseScene = scenes[0];
+    const timestamp = Date.now();
+    const modelId = baseScene?.modelId ?? videoModels[0]?.id ?? "seedance";
+    const videoConfig = baseScene?.videoConfig ?? ({} as VideoGenerationConfig);
+    const uploadScenes: Scene[] = files.map((file, index) => {
+      const sceneId = `upload-${timestamp}-${index + 1}`;
+      return {
+        id: sceneId,
+        index: index + 1,
+        title: `上传片段 ${index + 1}`,
+        prompt: `使用上传视频「${file.name}」作为第 ${index + 1} 段素材，按当前处理方式完成裁剪、比例适配、字幕和合成。`,
+        narration: "",
+        camera: "uploaded source video",
+        duration: 5,
+        modelId,
+        videoConfig: { ...videoConfig },
+        status: "done",
+        progress: 100,
+        failureReason: undefined,
+        versions: [],
+        selectedVersionId: undefined,
+        thumbnailClass: "bg-[linear-gradient(135deg,#101820,#22d3ee_50%,#8b5cf6)]"
+      };
+    });
+    const sceneIds = uploadScenes.map((scene) => scene.id);
+
+    useStudioStore.setState({
+      scriptStatus: "ready",
+      script: uploadScenes.map((scene) => `${scene.index}. ${scene.prompt}`).join("\n"),
+      phase: "export",
+      scenes: uploadScenes,
+      activeSceneId: sceneIds[0] ?? "",
+      exportStatus: "idle",
+      exportProgress: 0
+    });
+    setComposeSettings((settings) => ({
+      ...settings,
+      timelineOrder: sceneIds,
+      trims: Object.fromEntries(sceneIds.map((sceneId) => [sceneId, { start: 0, end: 5 }])),
+      transitions: Object.fromEntries(sceneIds.map((sceneId) => [sceneId, "cut" as TimelineTransition]))
+    }));
+
+    return uploadScenes;
+  };
+
   const handleDirectGenerate = () => {
     const prompt = directPrompt.trim() || brief.trim();
     if (!prompt) {
@@ -951,22 +997,62 @@ export default function StudioPage() {
     }
   };
 
-  const handleUploadPathVideo = async (file: File | null | undefined) => {
-    if (!file) {
+  const handleUploadPathVideos = async (fileList: FileList | File[] | null | undefined) => {
+    const files = Array.from(fileList ?? []);
+    const videoFiles = files.filter((file) => file.type.startsWith("video/"));
+
+    if (!activeRecordId) {
+      setLocalComposeStatus("error");
+      setLocalComposeError("请先选择或创建一条生成记录。");
+      return;
+    }
+
+    if (!videoFiles.length) {
+      if (files.length) {
+        setLocalComposeStatus("error");
+        setLocalComposeError("请选择浏览器可播放的视频文件。");
+      }
       return;
     }
 
     setActivePath("upload");
     setActiveStep("compose");
-    const sceneId = prepareSingleVideoScene({
-      title: "上传视频处理",
-      prompt: `基于上传视频「${file.name}」进行处理，保留主体内容并适配目标平台。`,
-      durationSeconds: 5,
-      modelId: scenes[0]?.modelId ?? videoModels[0]?.id ?? "seedance",
-      ratio: composeSettings.ratio
-    });
-    setComposeSelection({ type: "video", sceneId });
-    await handleLocalVideoUpload(sceneId, file);
+    setLocalComposeStatus("idle");
+    setLocalComposeProgress(0);
+    setLocalComposeError(files.length !== videoFiles.length ? "已跳过非视频文件。" : "");
+
+    const previousClipIds = Object.keys(useRecordAssetsStore.getState().localVideoClips);
+    await Promise.all(previousClipIds.map((sceneId) => removeClip(activeRecordId, sceneId).catch(() => undefined)));
+
+    const uploadScenes = prepareUploadVideoScenes(videoFiles);
+    setComposeSelection({ type: "video", sceneId: uploadScenes[0]?.id ?? "" });
+
+    const failedUploads: string[] = [];
+    for (let index = 0; index < videoFiles.length; index += 1) {
+      const file = videoFiles[index];
+      const scene = uploadScenes[index];
+      if (!file || !scene) {
+        continue;
+      }
+
+      try {
+        await addClip(activeRecordId, scene.id, file);
+        const clip = useRecordAssetsStore.getState().localVideoClips[scene.id];
+        if (clip) {
+          updateScene(scene.id, { duration: Math.max(1, Math.round(clip.duration)) });
+          updateSceneTrim(scene.id, { start: 0, end: clip.duration });
+        }
+      } catch (error) {
+        failedUploads.push(`${file.name}: ${error instanceof Error ? error.message : "读取失败"}`);
+      }
+    }
+
+    if (failedUploads.length) {
+      setLocalComposeStatus("error");
+      setLocalComposeError(failedUploads.join("；"));
+    }
+
+    await persistActiveRecordAssetsWithCover();
   };
 
   const handleRemoveLocalVideo = async (sceneId: string) => {
@@ -1140,57 +1226,8 @@ export default function StudioPage() {
             </div>
           </div>
 
-          <nav aria-label="Pipeline progress" className="flex min-w-0 flex-1 items-center justify-center">
-            <div className="flex w-full max-w-3xl items-center overflow-x-auto rounded-2xl border border-border/60 bg-elevated/80 px-2 py-1.5 shadow-soft">
-              {pipelineSteps.map((step, index) => {
-                const completed = completedByStep[step.id];
-                const running = runningByStep[step.id] || (activeStep === step.id && !completed);
-                return (
-                  <div key={step.id} className="flex min-w-fit items-center">
-                    <button
-                      onClick={() => {
-                        setActivePath("pipeline");
-                        setActiveStep(step.id);
-                      }}
-                      className={cn(
-                        "flex h-10 items-center gap-2 rounded-xl px-3 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-primary/40",
-                        activeStep === step.id
-                          ? "bg-primary/15 text-primary shadow-glow-sm"
-                          : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "flex h-6 w-6 items-center justify-center rounded-full border text-xs font-semibold",
-                          completed
-                            ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
-                            : running
-                              ? "border-primary/40 bg-primary/15 text-primary"
-                              : "border-border/80 bg-background text-muted-foreground"
-                        )}
-                      >
-                        {completed ? (
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                        ) : running ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          step.number
-                        )}
-                      </span>
-                      <span>
-                        <span className="block whitespace-nowrap font-semibold">{step.label}</span>
-                        <span className="block whitespace-nowrap text-[11px] text-muted-foreground">
-                          {step.description}
-                        </span>
-                      </span>
-                    </button>
-                    {index < pipelineSteps.length - 1 && (
-                      <ChevronRight className="mx-1 h-4 w-4 shrink-0 text-muted-foreground" />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+          <nav aria-label="Creation paths" className="flex min-w-0 flex-1 items-center justify-center">
+            <CreationPathSwitch activePath={activePath} onChange={setActivePath} />
           </nav>
 
           <div className="hidden min-w-[200px] items-center justify-end gap-2 lg:flex">
@@ -1240,7 +1277,14 @@ export default function StudioPage() {
               exportFileName={localTimelineExport?.fileName}
             />
 
-            <CreationPathSwitch activePath={activePath} onChange={setActivePath} />
+            {activePath === "pipeline" && (
+              <PipelineStepNav
+                activeStep={activeStep}
+                completedByStep={completedByStep}
+                runningByStep={runningByStep}
+                onStepSelect={setActiveStep}
+              />
+            )}
 
             <WorkspaceSummary
               finishedScenes={finishedScenes}
@@ -1369,14 +1413,15 @@ export default function StudioPage() {
             {activePath === "upload" && (
               <UploadVideoPathWorkspace
                 mode={uploadProcessMode}
-                scene={scenes[0]}
-                clip={scenes[0] ? localVideoClips[scenes[0].id] : undefined}
+                scenes={scenes}
+                clips={localVideoClips}
                 composeSettings={composeSettings}
                 localTimelineExport={localTimelineExport}
                 localComposeStatus={localComposeStatus}
                 localComposeProgress={localComposeProgress}
+                localComposeError={localComposeError}
                 onModeChange={setUploadProcessMode}
-                onUploadVideo={handleUploadPathVideo}
+                onUploadVideos={handleUploadPathVideos}
                 onUpdateComposeSettings={updateComposeSettings}
                 onMergeExport={handleMergeExport}
                 onGoCompose={() => {
@@ -1527,7 +1572,7 @@ function CreationPathSwitch({
   onChange: (path: CreationPath) => void;
 }) {
   return (
-    <div className="grid gap-3 lg:grid-cols-3">
+    <div className="flex w-full max-w-3xl items-center gap-1 overflow-x-auto rounded-2xl border border-border/60 bg-elevated/80 p-1 shadow-soft">
       {creationPaths.map((path) => {
         const PathIcon = path.icon;
         const active = activePath === path.id;
@@ -1537,27 +1582,90 @@ function CreationPathSwitch({
             type="button"
             onClick={() => onChange(path.id)}
             className={cn(
-              "group flex items-start gap-3 rounded-2xl border p-4 text-left transition",
+              "group flex min-w-fit flex-1 items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-primary/40",
               active
-                ? "border-cyan-400/35 bg-cyan-400/10 shadow-glow-sm"
-                : "border-border/60 bg-elevated/55 hover:border-primary/35 hover:bg-elevated"
+                ? "bg-primary/15 text-primary shadow-glow-sm"
+                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
             )}
           >
             <span
               className={cn(
-                "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border",
+                "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border",
                 active
-                  ? "border-cyan-300/40 bg-cyan-300/15 text-cyan-200"
+                  ? "border-primary/40 bg-primary/15 text-primary"
                   : "border-border bg-background text-muted-foreground group-hover:text-foreground"
               )}
             >
               <PathIcon className="h-4 w-4" />
             </span>
             <span className="min-w-0">
-              <span className="block text-sm font-semibold">{path.label}</span>
-              <span className="mt-1 block text-xs leading-5 text-muted-foreground">{path.description}</span>
+              <span className="block whitespace-nowrap font-semibold">{path.label}</span>
+              <span className="hidden whitespace-nowrap text-[11px] text-muted-foreground xl:block">{path.description}</span>
             </span>
           </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function PipelineStepNav({
+  activeStep,
+  completedByStep,
+  runningByStep,
+  onStepSelect
+}: {
+  activeStep: StudioStep;
+  completedByStep: Record<StudioStep, boolean>;
+  runningByStep: Record<StudioStep, boolean>;
+  onStepSelect: (step: StudioStep) => void;
+}) {
+  return (
+    <div className="flex w-full items-center overflow-x-auto rounded-2xl border border-border/60 bg-elevated/70 px-2 py-1.5 shadow-soft">
+      {pipelineSteps.map((step, index) => {
+        const completed = completedByStep[step.id];
+        const running = runningByStep[step.id] || (activeStep === step.id && !completed);
+        return (
+          <div key={step.id} className="flex min-w-fit flex-1 items-center">
+            <button
+              type="button"
+              onClick={() => onStepSelect(step.id)}
+              className={cn(
+                "flex h-10 w-full items-center gap-2 rounded-xl px-3 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-primary/40",
+                activeStep === step.id
+                  ? "bg-primary/15 text-primary shadow-glow-sm"
+                  : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+              )}
+            >
+              <span
+                className={cn(
+                  "flex h-6 w-6 items-center justify-center rounded-full border text-xs font-semibold",
+                  completed
+                    ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+                    : running
+                      ? "border-primary/40 bg-primary/15 text-primary"
+                      : "border-border/80 bg-background text-muted-foreground"
+                )}
+              >
+                {completed ? (
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                ) : running ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  step.number
+                )}
+              </span>
+              <span>
+                <span className="block whitespace-nowrap font-semibold">{step.label}</span>
+                <span className="block whitespace-nowrap text-[11px] text-muted-foreground">
+                  {step.description}
+                </span>
+              </span>
+            </button>
+            {index < pipelineSteps.length - 1 && (
+              <ChevronRight className="mx-1 h-4 w-4 shrink-0 text-muted-foreground" />
+            )}
+          </div>
         );
       })}
     </div>
@@ -1701,57 +1809,82 @@ function DirectVideoPathWorkspace({
 
 function UploadVideoPathWorkspace({
   mode,
-  scene,
-  clip,
+  scenes,
+  clips,
   composeSettings,
   localTimelineExport,
   localComposeStatus,
   localComposeProgress,
+  localComposeError,
   onModeChange,
-  onUploadVideo,
+  onUploadVideos,
   onUpdateComposeSettings,
   onMergeExport,
   onGoCompose
 }: {
   mode: string;
-  scene?: StudioScene;
-  clip?: LocalVideoClip;
+  scenes: StudioScene[];
+  clips: Record<string, LocalVideoClip>;
   composeSettings: ComposeSettings;
   localTimelineExport: LocalTimelineExport | null;
   localComposeStatus: LocalComposeStatus;
   localComposeProgress: number;
+  localComposeError: string;
   onModeChange: (value: string) => void;
-  onUploadVideo: (file: File | null | undefined) => void;
+  onUploadVideos: (files: FileList | File[] | null | undefined) => void;
   onUpdateComposeSettings: (patch: Partial<ComposeSettings>) => void;
   onMergeExport: () => void;
   onGoCompose: () => void;
 }) {
   const modes = ["智能裁剪", "加字幕", "配乐重包装", "平台比例适配"];
+  const uploadedScenes = scenes.filter((scene) => Boolean(clips[scene.id]));
+  const firstClip = uploadedScenes[0] ? clips[uploadedScenes[0].id] : undefined;
+  const clipCount = uploadedScenes.length;
+  const totalDuration = uploadedScenes.reduce((total, scene) => total + (clips[scene.id]?.duration ?? scene.duration), 0);
+  const totalSize = uploadedScenes.reduce((total, scene) => total + (clips[scene.id]?.size ?? 0), 0);
 
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
       <Card>
         <CardHeader>
           <CardTitle>上传视频处理</CardTitle>
-          <div className="mt-1 text-xs text-muted-foreground">上传本地视频后，直接进入裁剪、比例、字幕、配乐和合成处理。</div>
+          <div className="mt-1 text-xs text-muted-foreground">一次选择多个本地视频，按上传顺序写入时间轴并合成为一个 MP4。</div>
         </CardHeader>
         <CardContent className="space-y-4">
           <label className="flex min-h-44 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-cyan-400/35 bg-cyan-400/8 p-6 text-center transition hover:bg-cyan-400/12">
             <Upload className="h-7 w-7 text-cyan-200" />
-            <span className="text-sm font-semibold">{clip ? "替换上传视频" : "选择本地视频"}</span>
+            <span className="text-sm font-semibold">{clipCount ? "重新选择多个视频" : "选择多个本地视频"}</span>
             <span className="max-w-sm text-xs leading-5 text-muted-foreground">
-              支持浏览器可读取的视频文件。上传后会写入当前生成记录，并作为时间轴第一段素材。
+              支持多选。上传后每个视频会成为一条独立片段，保存在当前生成记录里，并按顺序进入合成时间轴。
             </span>
             <input
               type="file"
               accept="video/*"
+              multiple
               className="sr-only"
               onChange={(event) => {
-                onUploadVideo(event.target.files?.[0]);
+                onUploadVideos(event.target.files);
                 event.currentTarget.value = "";
               }}
             />
           </label>
+
+          {clipCount > 0 && (
+            <div className="grid gap-3 rounded-xl border border-border bg-background p-3 text-sm sm:grid-cols-3">
+              <div>
+                <div className="text-[11px] text-muted-foreground">片段数量</div>
+                <div className="mt-1 font-semibold">{clipCount} 个视频</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-muted-foreground">总时长</div>
+                <div className="mt-1 font-semibold">{totalDuration.toFixed(1)}s</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-muted-foreground">素材大小</div>
+                <div className="mt-1 font-semibold">{formatBytes(totalSize)}</div>
+              </div>
+            </div>
+          )}
 
           <div>
             <Label>处理方式</Label>
@@ -1810,30 +1943,52 @@ function UploadVideoPathWorkspace({
         <CardHeader className="flex flex-row items-center justify-between gap-3">
           <div>
             <CardTitle>处理预览</CardTitle>
-            <div className="mt-1 text-xs text-muted-foreground">上传视频可以直接进入合成，也可以继续打开完整时间轴。</div>
+            <div className="mt-1 text-xs text-muted-foreground">多段视频会按列表顺序合成，也可以打开完整时间轴继续排序和裁剪。</div>
           </div>
-          <Badge tone={clip ? "green" : "neutral"}>{clip ? "已载入" : "待上传"}</Badge>
+          <Badge tone={clipCount ? "green" : "neutral"}>{clipCount ? `${clipCount} 段已载入` : "待上传"}</Badge>
         </CardHeader>
         <CardContent className="space-y-4">
-          {clip ? (
+          {firstClip ? (
             <div className="overflow-hidden rounded-xl border border-border bg-background">
-              <video src={clip.url} className="aspect-video w-full bg-black object-contain" controls />
+              <video src={firstClip.url} className="aspect-video w-full bg-black object-contain" controls />
               <div className="grid gap-3 p-3 text-xs text-muted-foreground sm:grid-cols-3">
-                <span className="truncate">{clip.name}</span>
-                <span>{clip.duration.toFixed(1)}s</span>
-                <span>{formatBytes(clip.size)}</span>
+                <span className="truncate">{firstClip.name}</span>
+                <span>{firstClip.duration.toFixed(1)}s</span>
+                <span>{formatBytes(firstClip.size)}</span>
               </div>
             </div>
           ) : (
             <div className="flex aspect-video items-center justify-center rounded-xl border border-border bg-background text-sm text-muted-foreground">
-              上传后在这里预览原视频
+              上传后在这里预览第一段原视频
             </div>
           )}
 
-          {scene && (
-            <div className="rounded-lg border border-border bg-background p-3 text-sm">
-              <div className="font-semibold">当前处理片段：#{scene.index} {scene.title}</div>
-              <div className="mt-2 text-xs leading-5 text-muted-foreground">{scene.prompt}</div>
+          {uploadedScenes.length > 0 && (
+            <div className="space-y-2">
+              {uploadedScenes.map((scene) => {
+                const clip = clips[scene.id];
+                return (
+                  <div key={scene.id} className="rounded-lg border border-border bg-background p-3 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold">
+                          #{scene.index} {clip?.name ?? scene.title}
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {(clip?.duration ?? scene.duration).toFixed(1)}s · {clip ? formatBytes(clip.size) : "等待载入"}
+                        </div>
+                      </div>
+                      <Badge tone="green">时间轴片段</Badge>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {localComposeError && (
+            <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100">
+              {localComposeError}
             </div>
           )}
 
@@ -1859,11 +2014,11 @@ function UploadVideoPathWorkspace({
           )}
 
           <div className="grid gap-2 sm:grid-cols-2">
-            <Button onClick={onMergeExport} disabled={!clip || localComposeStatus === "merging"}>
+            <Button onClick={onMergeExport} disabled={!clipCount || localComposeStatus === "merging"}>
               {localComposeStatus === "merging" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Scissors className="h-4 w-4" />}
               一键处理成片
             </Button>
-            <Button variant="outline" onClick={onGoCompose} disabled={!clip}>
+            <Button variant="outline" onClick={onGoCompose} disabled={!clipCount}>
               打开完整时间轴
             </Button>
           </div>
