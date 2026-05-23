@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "FrameForge AI Video Platform",
-  description: "AI video generation SaaS platform for creators and operators."
+  title: "光影造物 · AI 视频创作",
+  description: "项目化管理多条生成记录，从脚本、分镜到合成导出的一站式 AI 视频创作平台。"
 };
 
 export default function RootLayout({
@@ -12,8 +12,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN">
-      <body>{children}</body>
+    <html lang="zh-CN" className="dark">
+      <body className="min-h-screen antialiased">{children}</body>
     </html>
   );
 }

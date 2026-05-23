@@ -4,11 +4,11 @@ import { cn } from "@/lib/utils";
 type BadgeTone = "neutral" | "green" | "amber" | "purple" | "red";
 
 const tones: Record<BadgeTone, string> = {
-  neutral: "border-border bg-muted text-muted-foreground",
-  green: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  amber: "border-amber-200 bg-amber-50 text-amber-700",
-  purple: "border-violet-200 bg-violet-50 text-violet-700",
-  red: "border-red-200 bg-red-50 text-red-700"
+  neutral: "border-border/80 bg-muted/80 text-muted-foreground",
+  green: "border-emerald-500/30 bg-emerald-500/15 text-emerald-300",
+  amber: "border-amber-500/30 bg-amber-500/15 text-amber-300",
+  purple: "border-violet-500/35 bg-violet-500/15 text-violet-300",
+  red: "border-red-500/35 bg-red-500/15 text-red-300"
 };
 
 export function Badge({

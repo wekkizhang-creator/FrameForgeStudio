@@ -33,21 +33,28 @@ const config: Config = {
           foreground: "hsl(var(--destructive-foreground))"
         },
         surface: "hsl(var(--surface))",
+        sidebar: "hsl(var(--sidebar))",
+        elevated: "hsl(var(--elevated))",
         success: "hsl(var(--success))",
         warning: "hsl(var(--warning))"
       },
       boxShadow: {
-        soft: "0 18px 60px rgba(15, 23, 42, 0.08)"
+        soft: "0 18px 60px rgba(0, 0, 0, 0.45)",
+        glow: "0 0 24px rgba(139, 92, 246, 0.35)",
+        "glow-sm": "0 0 12px rgba(139, 92, 246, 0.22)"
       },
       fontFamily: {
         sans: [
+          "PingFang SC",
+          "Microsoft YaHei",
           "Inter",
           "ui-sans-serif",
           "system-ui",
-          "Segoe UI",
-          "Arial",
           "sans-serif"
         ]
+      },
+      backgroundImage: {
+        "brand-gradient": "linear-gradient(135deg, #8b5cf6 0%, #d946ef 48%, #f472b6 100%)"
       }
     }
   },

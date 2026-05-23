@@ -13,8 +13,6 @@ import {
   Clock3,
   Download,
   Film,
-  Folder,
-  FolderOpen,
   GripVertical,
   Layers3,
   Loader2,
@@ -43,15 +41,25 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/form";
 import { Progress } from "@/components/ui/progress";
 import { SchemaParameterForm } from "@/components/schema-parameter-form";
+import { AuthGate } from "@/components/studio/auth-gate";
+import { ProjectSidebar } from "@/components/studio/project-sidebar";
 import { VideoFrame } from "@/components/video-frame";
 import { getDurationSecondsFromConfig } from "@/lib/model-parameter-schema";
+import { createDefaultComposeSettings } from "@/lib/record-utils";
 import { llmModels, videoModels } from "@/lib/mock-data";
-import type { SceneStatus, VideoGenerationConfig } from "@/lib/types";
+import type { Scene, SceneStatus, VideoGenerationConfig } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { persistActiveRecordAssetsWithCover } from "@/store/project-store";
+import { useProjectStore } from "@/store/project-store";
 import { useModelSchemaStore } from "@/store/model-schema-store";
+import type { ComposeSettings } from "@/store/record-assets-store";
+import { useRecordAssetsStore } from "@/store/record-assets-store";
 import { useStudioStore } from "@/store/studio-store";
+import { useUserAuthStore } from "@/store/user-auth-store";
+import type { RuntimeTimelineExport, RuntimeVideoClip } from "@/lib/types";
 
 type StudioStep = "script" | "storyboard" | "compose" | "export";
+type CreationPath = "pipeline" | "direct" | "upload";
 type PreviewRatio = "9:16" | "16:9";
 type TimelineTransition = "fade" | "cut";
 type ComposeSelection =
@@ -61,45 +69,11 @@ type ComposeSelection =
   | { type: "subtitle" }
   | { type: "voice" };
 
-interface ComposeSettings {
-  ratio: PreviewRatio;
-  timelineOrder: string[];
-  trims: Record<string, { start: number; end: number }>;
-  transitions: Record<string, TimelineTransition>;
-  bgmMode: "upload" | "library";
-  bgmFileName: string;
-  musicLibraryTrack: string;
-  bgmVolume: number;
-  subtitlePosition: "bottom" | "middle" | "top";
-  subtitleFontSize: number;
-  subtitleColor: string;
-  ttsModel: string;
-  ttsVoice: string;
-  exportProfile: "MP4 1080P" | "MP4 720P";
-  watermark: boolean;
-  previewPlaying: boolean;
-}
-
-interface LocalVideoClip {
-  sceneId: string;
-  name: string;
-  url: string;
-  type: string;
-  size: number;
-  duration: number;
-  file: File;
-}
-
-interface LocalTimelineExport {
-  url: string;
-  fileName: string;
-  mimeType: string;
-  size: number;
-  duration: number;
-  createdAt: string;
-}
-
-type LocalComposeStatus = "idle" | "merging" | "ready" | "error";
+type LocalComposeStatus = import("@/lib/types").LocalComposeStatus;
+type LocalVideoClip = RuntimeVideoClip;
+type LocalTimelineExport = RuntimeTimelineExport;
+type StudioScene = ReturnType<typeof useStudioStore.getState>["scenes"][number];
+type ExportProfile = ComposeSettings["exportProfile"];
 
 const pipelineSteps: Array<{
   id: StudioStep;
@@ -107,17 +81,36 @@ const pipelineSteps: Array<{
   label: string;
   description: string;
 }> = [
-  { id: "script", number: "①", label: "脚本生成", description: "LLM Script" },
-  { id: "storyboard", number: "②", label: "分镜视频", description: "Shots & Models" },
-  { id: "compose", number: "③", label: "视频合成", description: "Merge Timeline" },
-  { id: "export", number: "④", label: "导出", description: "Delivery" }
+  { id: "script", number: "①", label: "脚本生成", description: "大模型脚本" },
+  { id: "storyboard", number: "②", label: "分镜视频", description: "镜头与模型" },
+  { id: "compose", number: "③", label: "视频合成", description: "时间轴合成" },
+  { id: "export", number: "④", label: "导出", description: "交付文件" }
 ];
 
-const projectItems = [
-  { name: "Creator SaaS Launch", meta: "20s · 4 scenes", active: true },
-  { name: "Fashion Drop Film", meta: "30s · draft", active: false },
-  { name: "App Explainer", meta: "45s · review", active: false },
-  { name: "Commerce Batch", meta: "12 variants", active: false }
+const creationPaths: Array<{
+  id: CreationPath;
+  label: string;
+  description: string;
+  icon: typeof Route;
+}> = [
+  {
+    id: "pipeline",
+    label: "四步流程",
+    description: "脚本、分镜、合成、导出完整创作链路",
+    icon: Route
+  },
+  {
+    id: "direct",
+    label: "提示词直出视频",
+    description: "输入一句需求，直接选择模型生成单条视频",
+    icon: Sparkles
+  },
+  {
+    id: "upload",
+    label: "上传视频处理",
+    description: "上传本地视频，进入裁剪、字幕、配乐和合成",
+    icon: Upload
+  }
 ];
 
 const sceneStatusLabel: Record<SceneStatus, string> = {
@@ -136,6 +129,43 @@ const sceneStatusTone: Record<SceneStatus, "neutral" | "green" | "amber" | "red"
   failed: "red"
 };
 
+const exportProfiles: Array<{ value: ExportProfile; label: string; horizontal: string; vertical: string }> = [
+  { value: "MP4 720P", label: "MP4 720P（高清）", horizontal: "1280×720", vertical: "720×1280" },
+  { value: "MP4 1080P", label: "MP4 1080P（全高清）", horizontal: "1920×1080", vertical: "1080×1920" },
+  { value: "MP4 2K", label: "MP4 2K（超清）", horizontal: "2560×1440", vertical: "1440×2560" },
+  { value: "MP4 4K", label: "MP4 4K（超高清）", horizontal: "3840×2160", vertical: "2160×3840" },
+  { value: "MP4 8K", label: "MP4 8K（实验）", horizontal: "7680×4320", vertical: "4320×7680" }
+];
+
+function getExportDimensions(profile: string, ratio: PreviewRatio) {
+  const vertical = ratio !== "16:9";
+  if (profile.includes("8K")) {
+    return vertical ? { width: 4320, height: 7680 } : { width: 7680, height: 4320 };
+  }
+  if (profile.includes("4K")) {
+    return vertical ? { width: 2160, height: 3840 } : { width: 3840, height: 2160 };
+  }
+  if (profile.includes("2K")) {
+    return vertical ? { width: 1440, height: 2560 } : { width: 2560, height: 1440 };
+  }
+  if (profile.includes("1080")) {
+    return vertical ? { width: 1080, height: 1920 } : { width: 1920, height: 1080 };
+  }
+  return vertical ? { width: 720, height: 1280 } : { width: 1280, height: 720 };
+}
+
+const scriptStatusLabel: Record<"idle" | "generating" | "ready", string> = {
+  idle: "待生成",
+  generating: "生成中",
+  ready: "已生成"
+};
+
+const exportStatusLabel: Record<"idle" | "merging" | "ready", string> = {
+  idle: "待导出",
+  merging: "导出中",
+  ready: "已就绪"
+};
+
 function metricFormat(value: number, unit = "") {
   return `${value.toLocaleString("zh-CN")}${unit}`;
 }
@@ -149,12 +179,117 @@ function formatBytes(value: number) {
 
 function getRecorderMimeType() {
   const candidates = [
-    "video/webm;codecs=vp9,opus",
-    "video/webm;codecs=vp8,opus",
-    "video/webm;codecs=h264,opus",
-    "video/webm"
+    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    "video/mp4;codecs=avc1.42E01E",
+    "video/mp4;codecs=h264,aac",
+    "video/mp4"
   ];
   return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? "";
+}
+
+function getTimelineDuration(
+  scenes: StudioScene[],
+  clips: Record<string, LocalVideoClip>,
+  settings: ComposeSettings
+) {
+  return scenes.reduce((total, scene) => {
+    const fallbackEnd = clips[scene.id]?.duration ?? scene.duration;
+    const trim = settings.trims[scene.id] ?? { start: 0, end: fallbackEnd };
+    return total + Math.max(0.4, trim.end - trim.start);
+  }, 0);
+}
+
+async function readComposeError(response: Response) {
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/json")) {
+    const data = (await response.json().catch(() => null)) as { error?: string } | null;
+    return data?.error ?? "MP4 合成服务返回了未知错误。";
+  }
+
+  const text = await response.text().catch(() => "");
+  return text.trim() || "MP4 合成服务返回了未知错误。";
+}
+
+async function composeLocalTimelineViaApi({
+  scenes,
+  clips,
+  settings,
+  onProgress
+}: {
+  scenes: StudioScene[];
+  clips: Record<string, LocalVideoClip>;
+  settings: ComposeSettings;
+  onProgress: (progress: number) => void;
+}) {
+  if (window.location.protocol === "file:") {
+    throw new Error("当前是本地文件预览，无法连接 MP4 合成服务。请使用线上地址或启动带接口服务的预览环境。");
+  }
+
+  const totalSeconds = getTimelineDuration(scenes, clips, settings);
+  const formData = new FormData();
+  const payload = {
+    ratio: settings.ratio,
+    exportProfile: settings.exportProfile,
+    scenes: scenes.map((scene) => {
+      const fallbackEnd = clips[scene.id]?.duration ?? scene.duration;
+      const trim = settings.trims[scene.id] ?? { start: 0, end: fallbackEnd };
+      return {
+        id: scene.id,
+        index: scene.index,
+        title: scene.title,
+        narration: scene.narration,
+        duration: scene.duration,
+        trimStart: trim.start,
+        trimEnd: trim.end,
+        hasClip: Boolean(clips[scene.id])
+      };
+    })
+  };
+
+  formData.append("payload", JSON.stringify(payload));
+  scenes.forEach((scene) => {
+    const clip = clips[scene.id];
+    if (clip) {
+      formData.append(`clip:${scene.id}`, clip.file, clip.name);
+    }
+  });
+
+  let simulatedProgress = 8;
+  onProgress(simulatedProgress);
+  const timer = window.setInterval(() => {
+    simulatedProgress = Math.min(92, simulatedProgress + 3);
+    onProgress(simulatedProgress);
+  }, 1200);
+
+  try {
+    const response = await fetch("/api/local-compose", {
+      method: "POST",
+      body: formData
+    });
+
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!response.ok) {
+      throw new Error(await readComposeError(response));
+    }
+    if (!contentType.includes("video/mp4")) {
+      throw new Error("MP4 合成服务没有返回 video/mp4 文件，请检查云端合成服务是否已启动。");
+    }
+
+    const blob = await response.blob();
+    if (!blob.size) {
+      throw new Error("MP4 合成服务返回了空文件，请重试。");
+    }
+
+    onProgress(100);
+    return {
+      blob: new Blob([blob], { type: "video/mp4" }),
+      mimeType: "video/mp4",
+      duration: totalSeconds
+    };
+  } finally {
+    window.clearInterval(timer);
+  }
 }
 
 function waitForVideoMetadata(video: HTMLVideoElement) {
@@ -271,7 +406,7 @@ async function renderPlaceholderSegment({
   updateProgress
 }: {
   context: CanvasRenderingContext2D;
-  scene: ReturnType<typeof useStudioStore.getState>["scenes"][number];
+  scene: StudioScene;
   canvasWidth: number;
   canvasHeight: number;
   seconds: number;
@@ -299,7 +434,7 @@ async function renderVideoSegment({
   audioContext
 }: {
   context: CanvasRenderingContext2D;
-  scene: ReturnType<typeof useStudioStore.getState>["scenes"][number];
+  scene: StudioScene;
   clip: LocalVideoClip;
   trim: { start: number; end: number };
   canvasWidth: number;
@@ -352,24 +487,51 @@ async function composeLocalTimeline({
   settings,
   onProgress
 }: {
-  scenes: ReturnType<typeof useStudioStore.getState>["scenes"];
+  scenes: StudioScene[];
   clips: Record<string, LocalVideoClip>;
   settings: ComposeSettings;
   onProgress: (progress: number) => void;
 }) {
+  const hasUploadedClips = scenes.some((scene) => Boolean(clips[scene.id]));
+  let apiError = "";
+
+  if (hasUploadedClips) {
+    try {
+      return await composeLocalTimelineViaApi({
+        scenes,
+        clips,
+        settings,
+        onProgress
+      });
+    } catch (error) {
+      apiError = error instanceof Error ? error.message : "MP4 合成服务调用失败。";
+    }
+  }
+
   if (!("MediaRecorder" in window)) {
-    throw new Error("当前浏览器不支持 MediaRecorder，无法在本地合成视频。");
+    throw new Error(`${apiError ? `${apiError} ` : ""}当前浏览器不支持 MediaRecorder，无法在本地生成 MP4。`);
   }
 
   const mimeType = getRecorderMimeType();
   if (!mimeType) {
-    throw new Error("当前浏览器不支持可用的视频录制编码。建议使用最新版 Chrome 或 Edge。");
+    throw new Error(`${apiError ? `${apiError} ` : ""}当前浏览器不支持 MP4 录制编码，请使用线上 MP4 合成服务或最新版本 Chrome / Edge。`);
   }
 
-  const isVertical = settings.ratio === "9:16";
-  const isHigh = settings.exportProfile.includes("1080");
-  const canvasWidth = isVertical ? (isHigh ? 1080 : 720) : isHigh ? 1920 : 1280;
-  const canvasHeight = isVertical ? (isHigh ? 1920 : 1280) : isHigh ? 1080 : 720;
+  const { width: canvasWidth, height: canvasHeight } = getExportDimensions(
+    settings.exportProfile,
+    settings.ratio
+  );
+  const pixelCount = canvasWidth * canvasHeight;
+  const videoBitsPerSecond =
+    pixelCount >= 7680 * 4320
+      ? 60_000_000
+      : pixelCount >= 3840 * 2160
+        ? 35_000_000
+        : pixelCount >= 2560 * 1440
+          ? 18_000_000
+          : pixelCount >= 1920 * 1080
+            ? 8_000_000
+            : 4_500_000;
   const canvas = document.createElement("canvas");
   canvas.width = canvasWidth;
   canvas.height = canvasHeight;
@@ -395,7 +557,7 @@ async function composeLocalTimeline({
 
   const recorder = new MediaRecorder(stream, {
     mimeType,
-    videoBitsPerSecond: isHigh ? 8_000_000 : 4_500_000
+    videoBitsPerSecond
   });
   const chunks: Blob[] = [];
   const stopped = new Promise<Blob>((resolve) => {
@@ -407,11 +569,7 @@ async function composeLocalTimeline({
     recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
   });
 
-  const totalSeconds = scenes.reduce((total, scene) => {
-    const fallbackEnd = clips[scene.id]?.duration ?? scene.duration;
-    const trim = settings.trims[scene.id] ?? { start: 0, end: fallbackEnd };
-    return total + Math.max(0.4, trim.end - trim.start);
-  }, 0);
+  const totalSeconds = getTimelineDuration(scenes, clips, settings);
   let completedSeconds = 0;
 
   recorder.start(1000);
@@ -468,31 +626,44 @@ async function composeLocalTimeline({
 
 export default function StudioPage() {
   const [activeStep, setActiveStep] = useState<StudioStep>("script");
+  const [activePath, setActivePath] = useState<CreationPath>("pipeline");
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
   const [composeSelection, setComposeSelection] = useState<ComposeSelection>({ type: "preview" });
-  const [composeSettings, setComposeSettings] = useState<ComposeSettings>({
-    ratio: "9:16",
-    timelineOrder: [],
-    trims: {},
-    transitions: {},
-    bgmMode: "library",
-    bgmFileName: "",
-    musicLibraryTrack: "Warm Creator Pulse",
-    bgmVolume: 62,
-    subtitlePosition: "bottom",
-    subtitleFontSize: 42,
-    subtitleColor: "#ffffff",
-    ttsModel: "Azure TTS",
-    ttsVoice: "zh-CN-Xiaoxiao",
-    exportProfile: "MP4 1080P",
-    watermark: true,
-    previewPlaying: false
+  const [directPrompt, setDirectPrompt] = useState("");
+  const [directModelId, setDirectModelId] = useState(videoModels[0]?.id ?? "seedance");
+  const [directDuration, setDirectDuration] = useState("5");
+  const [directRatio, setDirectRatio] = useState<PreviewRatio>("9:16");
+  const [directError, setDirectError] = useState("");
+  const [uploadProcessMode, setUploadProcessMode] = useState("智能裁剪");
+  const activeRecordId = useProjectStore((s) => s.activeRecordId);
+  const recordContext = useProjectStore((state) => {
+    const project = state.projects.find((item) => item.id === state.activeProjectId);
+    const record = project?.records.find((item) => item.id === state.activeRecordId);
+    return {
+      projectName: project?.name ?? "未选择项目",
+      recordName: record?.name ?? "未选择记录",
+      recordUpdatedAt: record?.updatedAt
+    };
   });
-  const [localVideoClips, setLocalVideoClips] = useState<Record<string, LocalVideoClip>>({});
-  const [localTimelineExport, setLocalTimelineExport] = useState<LocalTimelineExport | null>(null);
-  const [localComposeStatus, setLocalComposeStatus] = useState<LocalComposeStatus>("idle");
-  const [localComposeProgress, setLocalComposeProgress] = useState(0);
-  const [localComposeError, setLocalComposeError] = useState("");
+  const currentUser = useUserAuthStore((state) => state.currentUser());
+  const logout = useUserAuthStore((state) => state.logout);
+  const {
+    localVideoClips,
+    localTimelineExport,
+    composeSettings,
+    localComposeStatus,
+    localComposeProgress,
+    localComposeError,
+    isLoading: assetsLoading,
+    setComposeSettings,
+    setLocalComposeStatus,
+    setLocalComposeProgress,
+    setLocalComposeError,
+    addClip,
+    removeClip,
+    setTimelineExport,
+    clearRuntime
+  } = useRecordAssetsStore();
   const localVideoClipsRef = useRef<Record<string, LocalVideoClip>>({});
   const localTimelineExportRef = useRef<LocalTimelineExport | null>(null);
 
@@ -559,6 +730,15 @@ export default function StudioPage() {
   const renderProgress = scenes.length
     ? Math.round(scenes.reduce((total, scene) => total + scene.progress, 0) / scenes.length)
     : 0;
+  const generatedVideoCount = useMemo(
+    () =>
+      scenes.reduce((total, scene) => {
+        const doneVersions = scene.versions.filter((version) => version.status === "done").length;
+        return total + Math.max(doneVersions, scene.status === "done" ? 1 : 0);
+      }, 0),
+    [scenes]
+  );
+  const activeRecordSyncRef = useRef(activeRecordId);
 
   const completedByStep = useMemo(
     () => ({
@@ -597,6 +777,37 @@ export default function StudioPage() {
   }, [activeStep, allScenesDone, exportStatus]);
 
   useEffect(() => {
+    if (!activeRecordId || activeRecordSyncRef.current === activeRecordId) {
+      return;
+    }
+
+    activeRecordSyncRef.current = activeRecordId;
+    const timer = window.setTimeout(() => {
+      if (useProjectStore.getState().activeRecordId !== activeRecordId) {
+        return;
+      }
+
+      const snapshot = useStudioStore.getState();
+      const hasGeneratedVideos = snapshot.scenes.some(
+        (scene) => scene.status !== "idle" || scene.versions.length > 0
+      );
+
+      if (snapshot.exportStatus === "ready" || snapshot.phase === "complete") {
+        setActiveStep("export");
+      } else if (snapshot.phase === "export") {
+        setActiveStep("compose");
+      } else if (snapshot.phase === "rendering" || snapshot.phase === "storyboard" || hasGeneratedVideos) {
+        setActiveStep("storyboard");
+      } else {
+        setActiveStep("script");
+      }
+      setComposeSelection({ type: "preview" });
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [activeRecordId]);
+
+  useEffect(() => {
     localVideoClipsRef.current = localVideoClips;
   }, [localVideoClips]);
 
@@ -604,33 +815,165 @@ export default function StudioPage() {
     localTimelineExportRef.current = localTimelineExport;
   }, [localTimelineExport]);
 
-  useEffect(
-    () => () => {
-      Object.values(localVideoClipsRef.current).forEach((clip) => URL.revokeObjectURL(clip.url));
-      if (localTimelineExportRef.current) {
-        URL.revokeObjectURL(localTimelineExportRef.current.url);
-      }
-    },
-    []
-  );
+  useEffect(() => {
+    if (!directPrompt && brief.trim()) {
+      setDirectPrompt(brief.trim().slice(0, 220));
+    }
+  }, [brief, directPrompt]);
+
 
   const handleGenerateScript = () => {
+    setActivePath("pipeline");
     setActiveStep("script");
     generateScript();
   };
 
   const handleGenerateStoryboard = () => {
+    setActivePath("pipeline");
     setActiveStep("storyboard");
     generateStoryboard();
   };
 
   const handleRenderScenes = () => {
+    setActivePath("pipeline");
     setActiveStep("storyboard");
     renderScenes();
   };
 
-  const handleLocalVideoUpload = (sceneId: string, file: File | null | undefined) => {
-    if (!file) {
+  const prepareSingleVideoScene = ({
+    title,
+    prompt,
+    durationSeconds,
+    modelId,
+    ratio
+  }: {
+    title: string;
+    prompt: string;
+    durationSeconds: number;
+    modelId: string;
+    ratio: PreviewRatio;
+  }) => {
+    const baseScene = scenes[0];
+    const sceneId = baseScene?.id ?? `scene-${Date.now()}`;
+    const scene: Scene = {
+      ...(baseScene ?? {
+        id: sceneId,
+        index: 1,
+        title,
+        prompt,
+        narration: prompt,
+        camera: "static, clean product framing",
+        duration: durationSeconds,
+        modelId,
+        videoConfig: {} as VideoGenerationConfig,
+        status: "idle" as const,
+        progress: 0,
+        versions: [],
+        thumbnailClass: "bg-[linear-gradient(135deg,#101820,#22d3ee_50%,#8b5cf6)]"
+      }),
+      id: sceneId,
+      index: 1,
+      title,
+      prompt,
+      narration: prompt,
+      duration: durationSeconds,
+      modelId,
+      status: "idle",
+      progress: 0,
+      failureReason: undefined,
+      versions: [],
+      selectedVersionId: undefined
+    };
+
+    useStudioStore.setState({
+      scriptStatus: "ready",
+      script: `${title}：${prompt}`,
+      phase: "storyboard",
+      scenes: [scene],
+      activeSceneId: sceneId,
+      exportStatus: "idle",
+      exportProgress: 0
+    });
+    setComposeSettings((settings) => ({
+      ...settings,
+      ratio,
+      timelineOrder: [sceneId],
+      trims: { [sceneId]: { start: 0, end: durationSeconds } },
+      transitions: { [sceneId]: "cut" }
+    }));
+
+    return sceneId;
+  };
+
+  const prepareUploadVideoScenes = (files: File[]) => {
+    const baseScene = scenes[0];
+    const timestamp = Date.now();
+    const modelId = baseScene?.modelId ?? videoModels[0]?.id ?? "seedance";
+    const videoConfig = baseScene?.videoConfig ?? ({} as VideoGenerationConfig);
+    const uploadScenes: Scene[] = files.map((file, index) => {
+      const sceneId = `upload-${timestamp}-${index + 1}`;
+      return {
+        id: sceneId,
+        index: index + 1,
+        title: `上传片段 ${index + 1}`,
+        prompt: `使用上传视频「${file.name}」作为第 ${index + 1} 段素材，按当前处理方式完成裁剪、比例适配、字幕和合成。`,
+        narration: "",
+        camera: "uploaded source video",
+        duration: 5,
+        modelId,
+        videoConfig: { ...videoConfig },
+        status: "done",
+        progress: 100,
+        failureReason: undefined,
+        versions: [],
+        selectedVersionId: undefined,
+        thumbnailClass: "bg-[linear-gradient(135deg,#101820,#22d3ee_50%,#8b5cf6)]"
+      };
+    });
+    const sceneIds = uploadScenes.map((scene) => scene.id);
+
+    useStudioStore.setState({
+      scriptStatus: "ready",
+      script: uploadScenes.map((scene) => `${scene.index}. ${scene.prompt}`).join("\n"),
+      phase: "export",
+      scenes: uploadScenes,
+      activeSceneId: sceneIds[0] ?? "",
+      exportStatus: "idle",
+      exportProgress: 0
+    });
+    setComposeSettings((settings) => ({
+      ...settings,
+      timelineOrder: sceneIds,
+      trims: Object.fromEntries(sceneIds.map((sceneId) => [sceneId, { start: 0, end: 5 }])),
+      transitions: Object.fromEntries(sceneIds.map((sceneId) => [sceneId, "cut" as TimelineTransition]))
+    }));
+
+    return uploadScenes;
+  };
+
+  const handleDirectGenerate = () => {
+    const prompt = directPrompt.trim() || brief.trim();
+    if (!prompt) {
+      setDirectError("请先输入视频提示词。");
+      return;
+    }
+
+    setDirectError("");
+    setDirectPrompt(prompt);
+    setActivePath("direct");
+    setActiveStep("storyboard");
+    const sceneId = prepareSingleVideoScene({
+      title: "提示词直出视频",
+      prompt,
+      durationSeconds: Number(directDuration),
+      modelId: directModelId,
+      ratio: directRatio
+    });
+    void useStudioStore.getState().generateSceneVideo(sceneId);
+  };
+
+  const handleLocalVideoUpload = async (sceneId: string, file: File | null | undefined) => {
+    if (!file || !activeRecordId) {
       return;
     }
 
@@ -640,72 +983,87 @@ export default function StudioPage() {
       return;
     }
 
-    const previousClip = localVideoClipsRef.current[sceneId];
-    if (previousClip) {
-      URL.revokeObjectURL(previousClip.url);
-    }
-
-    const url = URL.createObjectURL(file);
-    const video = document.createElement("video");
-    video.preload = "metadata";
-    video.src = url;
-
-    video.onloadedmetadata = () => {
-      const durationSeconds = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 5;
-      const roundedDuration = Math.max(1, Math.round(durationSeconds * 10) / 10);
-
-      setLocalVideoClips((clips) => ({
-        ...clips,
-        [sceneId]: {
-          sceneId,
-          file,
-          url,
-          name: file.name,
-          type: file.type || "video/*",
-          size: file.size,
-          duration: roundedDuration
-        }
-      }));
-      updateScene(sceneId, { duration: Math.max(1, Math.round(roundedDuration)) });
-      updateSceneTrim(sceneId, { start: 0, end: roundedDuration });
-      setLocalTimelineExport((current) => {
-        if (current) {
-          URL.revokeObjectURL(current.url);
-        }
-        return null;
-      });
-      setLocalComposeStatus("idle");
-      setLocalComposeProgress(0);
-      setLocalComposeError("");
-    };
-
-    video.onerror = () => {
-      URL.revokeObjectURL(url);
+    try {
+      await addClip(activeRecordId, sceneId, file);
+      const clip = useRecordAssetsStore.getState().localVideoClips[sceneId];
+      if (clip) {
+        updateScene(sceneId, { duration: Math.max(1, Math.round(clip.duration)) });
+        updateSceneTrim(sceneId, { start: 0, end: clip.duration });
+      }
+      await persistActiveRecordAssetsWithCover();
+    } catch (error) {
       setLocalComposeStatus("error");
-      setLocalComposeError("无法读取视频元数据，请换一个编码更标准的视频文件。");
-    };
+      setLocalComposeError(error instanceof Error ? error.message : "无法读取视频元数据。");
+    }
   };
 
-  const handleRemoveLocalVideo = (sceneId: string) => {
-    const currentClip = localVideoClipsRef.current[sceneId];
-    if (currentClip) {
-      URL.revokeObjectURL(currentClip.url);
+  const handleUploadPathVideos = async (fileList: FileList | File[] | null | undefined) => {
+    const files = Array.from(fileList ?? []);
+    const videoFiles = files.filter((file) => file.type.startsWith("video/"));
+
+    if (!activeRecordId) {
+      setLocalComposeStatus("error");
+      setLocalComposeError("请先选择或创建一条生成记录。");
+      return;
     }
 
-    setLocalVideoClips((clips) => {
-      const next = { ...clips };
-      delete next[sceneId];
-      return next;
-    });
-    setLocalTimelineExport((current) => {
-      if (current) {
-        URL.revokeObjectURL(current.url);
+    if (!videoFiles.length) {
+      if (files.length) {
+        setLocalComposeStatus("error");
+        setLocalComposeError("请选择浏览器可播放的视频文件。");
       }
-      return null;
-    });
+      return;
+    }
+
+    setActivePath("upload");
+    setActiveStep("compose");
+    setLocalComposeStatus("idle");
+    setLocalComposeProgress(0);
+    setLocalComposeError(files.length !== videoFiles.length ? "已跳过非视频文件。" : "");
+
+    const previousClipIds = Object.keys(useRecordAssetsStore.getState().localVideoClips);
+    await Promise.all(previousClipIds.map((sceneId) => removeClip(activeRecordId, sceneId).catch(() => undefined)));
+
+    const uploadScenes = prepareUploadVideoScenes(videoFiles);
+    setComposeSelection({ type: "video", sceneId: uploadScenes[0]?.id ?? "" });
+
+    const failedUploads: string[] = [];
+    for (let index = 0; index < videoFiles.length; index += 1) {
+      const file = videoFiles[index];
+      const scene = uploadScenes[index];
+      if (!file || !scene) {
+        continue;
+      }
+
+      try {
+        await addClip(activeRecordId, scene.id, file);
+        const clip = useRecordAssetsStore.getState().localVideoClips[scene.id];
+        if (clip) {
+          updateScene(scene.id, { duration: Math.max(1, Math.round(clip.duration)) });
+          updateSceneTrim(scene.id, { start: 0, end: clip.duration });
+        }
+      } catch (error) {
+        failedUploads.push(`${file.name}: ${error instanceof Error ? error.message : "读取失败"}`);
+      }
+    }
+
+    if (failedUploads.length) {
+      setLocalComposeStatus("error");
+      setLocalComposeError(failedUploads.join("；"));
+    }
+
+    await persistActiveRecordAssetsWithCover();
+  };
+
+  const handleRemoveLocalVideo = async (sceneId: string) => {
+    if (!activeRecordId) {
+      return;
+    }
+    await removeClip(activeRecordId, sceneId);
     setLocalComposeStatus("idle");
     setLocalComposeProgress(0);
     setLocalComposeError("");
+    await persistActiveRecordAssetsWithCover();
   };
 
   const handleMergeExport = async () => {
@@ -726,12 +1084,9 @@ export default function StudioPage() {
 
     setLocalComposeStatus("merging");
     setLocalComposeProgress(1);
-    setLocalTimelineExport((current) => {
-      if (current) {
-        URL.revokeObjectURL(current.url);
-      }
-      return null;
-    });
+    if (activeRecordId) {
+      await useRecordAssetsStore.getState().clearTimelineExport(activeRecordId);
+    }
     mergeExport();
 
     try {
@@ -741,21 +1096,15 @@ export default function StudioPage() {
         settings: composeSettings,
         onProgress: setLocalComposeProgress
       });
-      const url = URL.createObjectURL(result.blob);
-      const extension = result.mimeType.includes("mp4") ? "mp4" : "webm";
-      setLocalTimelineExport({
-        url,
-        fileName: `frameforge-local-compose-${Date.now()}.${extension}`,
-        mimeType: result.mimeType,
-        size: result.blob.size,
-        duration: result.duration,
-        createdAt: new Intl.DateTimeFormat("zh-CN", {
-          hour: "2-digit",
-          minute: "2-digit"
-        }).format(new Date())
-      });
-      setLocalComposeStatus("ready");
-      setLocalComposeProgress(100);
+      if (activeRecordId) {
+        await setTimelineExport(activeRecordId, {
+          blob: result.blob,
+          fileName: `jimeng-compose-${Date.now()}.mp4`,
+          mimeType: result.mimeType,
+          duration: result.duration
+        });
+        await persistActiveRecordAssetsWithCover();
+      }
       setActiveStep("export");
     } catch (error) {
       setLocalComposeStatus("error");
@@ -763,23 +1112,39 @@ export default function StudioPage() {
     }
   };
 
-  const resetAll = () => {
+  const resetAll = async () => {
     resetPipeline();
     setActiveStep("script");
-    Object.values(localVideoClipsRef.current).forEach((clip) => URL.revokeObjectURL(clip.url));
-    setLocalVideoClips({});
-    setLocalTimelineExport((current) => {
-      if (current) {
-        URL.revokeObjectURL(current.url);
+    if (activeRecordId) {
+      const assets = useProjectStore.getState().projects
+        .find((p) => p.id === useProjectStore.getState().activeProjectId)
+        ?.records.find((r) => r.id === activeRecordId)?.assets;
+      if (assets) {
+        await useRecordAssetsStore.getState().deleteRecordMedia(activeRecordId, assets);
       }
-      return null;
-    });
-    setLocalComposeStatus("idle");
-    setLocalComposeProgress(0);
-    setLocalComposeError("");
+      const sceneIds = scenes.map((s) => s.id);
+      useProjectStore.getState().updateActiveRecordAssets(
+        {
+          clips: [],
+          timelineExport: null,
+          composeSettings: createDefaultComposeSettings(sceneIds),
+          localComposeStatus: "idle",
+          localComposeProgress: 0,
+          localComposeError: ""
+        },
+        undefined
+      );
+      clearRuntime();
+      setComposeSettings({ ...createDefaultComposeSettings(sceneIds), previewPlaying: false });
+    } else {
+      clearRuntime();
+    }
   };
 
   useEffect(() => {
+    if (assetsLoading) {
+      return;
+    }
     setComposeSettings((settings) => {
       const sceneIds = scenes.map((scene) => scene.id);
       const orderedExisting = settings.timelineOrder.filter((sceneId) => sceneIds.includes(sceneId));
@@ -800,7 +1165,7 @@ export default function StudioPage() {
         transitions: nextTransitions
       };
     });
-  }, [scenes]);
+  }, [assetsLoading, scenes, setComposeSettings]);
 
   const updateComposeSettings = (patch: Partial<ComposeSettings>) => {
     setComposeSettings((settings) => ({ ...settings, ...patch }));
@@ -845,79 +1210,44 @@ export default function StudioPage() {
   };
 
   return (
+    <AuthGate>
     <main className="min-h-screen bg-background text-foreground">
-      <header className="fixed inset-x-0 top-0 z-40 border-b border-border bg-background/94 px-4 py-3 backdrop-blur lg:h-[76px] lg:px-6 lg:py-0">
+      <header className="fixed inset-x-0 top-0 z-40 border-b border-border/70 bg-background/80 px-4 py-3 backdrop-blur-xl lg:h-[72px] lg:px-6 lg:py-0">
         <div className="flex h-full flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex min-w-[220px] items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-md bg-foreground text-white">
+          <div className="flex min-w-[200px] items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-gradient text-white shadow-glow-sm">
               <Film className="h-4 w-4" />
             </div>
             <div>
-              <div className="text-sm font-semibold">FrameForge Studio</div>
-              <div className="text-xs text-muted-foreground">AI Video Creation Workspace</div>
+              <div className="text-sm font-semibold">
+                <span className="text-gradient">光影造物</span>
+              </div>
+              <div className="text-[11px] text-muted-foreground">脚本 · 分镜 · 合成 · 导出</div>
             </div>
           </div>
 
-          <nav aria-label="Pipeline progress" className="flex min-w-0 flex-1 items-center justify-center">
-            <div className="flex w-full max-w-3xl items-center overflow-x-auto rounded-lg border border-border bg-surface px-2 py-2 shadow-sm">
-              {pipelineSteps.map((step, index) => {
-                const completed = completedByStep[step.id];
-                const running = runningByStep[step.id] || (activeStep === step.id && !completed);
-                return (
-                  <div key={step.id} className="flex min-w-fit items-center">
-                    <button
-                      onClick={() => setActiveStep(step.id)}
-                      className={cn(
-                        "flex h-10 items-center gap-2 rounded-md px-3 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-ring",
-                        activeStep === step.id
-                          ? "bg-primary/[0.09] text-primary"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "flex h-6 w-6 items-center justify-center rounded-full border text-xs font-semibold",
-                          completed
-                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                            : running
-                              ? "border-primary/35 bg-primary/10 text-primary"
-                              : "border-border bg-background text-muted-foreground"
-                        )}
-                      >
-                        {completed ? (
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                        ) : running ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          step.number
-                        )}
-                      </span>
-                      <span>
-                        <span className="block whitespace-nowrap font-semibold">{step.label}</span>
-                        <span className="block whitespace-nowrap text-[11px] text-muted-foreground">
-                          {step.description}
-                        </span>
-                      </span>
-                    </button>
-                    {index < pipelineSteps.length - 1 && (
-                      <ChevronRight className="mx-1 h-4 w-4 shrink-0 text-muted-foreground" />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+          <nav aria-label="Creation paths" className="flex min-w-0 flex-1 items-center justify-center">
+            <CreationPathSwitch activePath={activePath} onChange={setActivePath} />
           </nav>
 
-          <div className="hidden min-w-[220px] items-center justify-end gap-2 lg:flex">
+          <div className="hidden min-w-[200px] items-center justify-end gap-2 lg:flex">
+            {currentUser && (
+              <div className="max-w-[140px] truncate rounded-lg border border-border/70 bg-elevated px-3 py-1.5 text-xs text-muted-foreground">
+                {currentUser.name}
+              </div>
+            )}
             <Button variant="outline" size="sm" onClick={resetAll}>
               <RefreshCcw className="h-3.5 w-3.5" />
-              重置
+              重置当前记录
+            </Button>
+            <Button variant="ghost" size="sm" onClick={logout}>
+              退出登录
             </Button>
             <Link
               href="/admin"
-              className="inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded-md bg-foreground px-3 text-xs font-medium text-white shadow-sm transition-colors hover:bg-foreground/90 focus:outline-none focus:ring-2 focus:ring-ring"
+              className="inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded-lg border border-border/70 bg-elevated px-3 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
             >
-              Admin Console
+              运营后台
               <ArrowRight className="h-3.5 w-3.5" />
             </Link>
           </div>
@@ -926,16 +1256,36 @@ export default function StudioPage() {
 
       <div
         className={cn(
-          "grid min-h-screen grid-cols-1 pt-[126px] lg:pt-[76px]",
+          "grid min-h-screen grid-cols-1 pt-[126px] lg:pt-[72px]",
           propertiesCollapsed
-            ? "lg:grid-cols-[260px_minmax(0,1fr)_64px]"
-            : "lg:grid-cols-[260px_minmax(0,1fr)_336px]"
+            ? "lg:grid-cols-[288px_minmax(0,1fr)_64px]"
+            : "lg:grid-cols-[288px_minmax(0,1fr)_336px]"
         )}
       >
         <ProjectSidebar />
 
         <section className="panel-grid min-w-0 px-4 py-5 sm:px-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-5">
+            <RecordContextBar
+              projectName={recordContext.projectName}
+              recordName={recordContext.recordName}
+              recordUpdatedAt={recordContext.recordUpdatedAt}
+              assetsLoading={assetsLoading}
+              generatedVideoCount={generatedVideoCount}
+              localClipCount={Object.keys(localVideoClips).length}
+              hasTimelineExport={Boolean(localTimelineExport)}
+              exportFileName={localTimelineExport?.fileName}
+            />
+
+            {activePath === "pipeline" && (
+              <PipelineStepNav
+                activeStep={activeStep}
+                completedByStep={completedByStep}
+                runningByStep={runningByStep}
+                onStepSelect={setActiveStep}
+              />
+            )}
+
             <WorkspaceSummary
               finishedScenes={finishedScenes}
               totalScenes={scenes.length}
@@ -943,7 +1293,7 @@ export default function StudioPage() {
               exportFormat={exportFormat}
             />
 
-            {activeStep === "script" && (
+            {activePath === "pipeline" && activeStep === "script" && (
               <ScriptWorkspace
                 brief={brief}
                 tone={tone}
@@ -979,7 +1329,7 @@ export default function StudioPage() {
               />
             )}
 
-            {activeStep === "storyboard" && (
+            {activePath === "pipeline" && activeStep === "storyboard" && (
               <StoryboardWorkspace
                 scenes={scenes}
                 renderProgress={renderProgress}
@@ -994,7 +1344,7 @@ export default function StudioPage() {
               />
             )}
 
-            {activeStep === "compose" && (
+            {activePath === "pipeline" && activeStep === "compose" && (
               <ComposeWorkspace
                 scenes={scenes}
                 allScenesDone={allScenesDone}
@@ -1012,6 +1362,9 @@ export default function StudioPage() {
                 onUpdateSceneTrim={updateSceneTrim}
                 onUpdateSceneTransition={updateSceneTransition}
                 onReorderTimeline={reorderTimeline}
+                onUpdateScene={updateScene}
+                onAppendScene={appendScene}
+                onDeleteScene={deleteScene}
                 onUploadLocalVideo={handleLocalVideoUpload}
                 onRemoveLocalVideo={handleRemoveLocalVideo}
                 onMergeExport={handleMergeExport}
@@ -1019,7 +1372,7 @@ export default function StudioPage() {
               />
             )}
 
-            {activeStep === "export" && (
+            {activePath === "pipeline" && activeStep === "export" && (
               <ExportWorkspace
                 exportFormat={exportFormat}
                 exportProgress={exportProgress}
@@ -1030,6 +1383,51 @@ export default function StudioPage() {
                 localComposeError={localComposeError}
                 onExportFormatChange={setExportFormat}
                 onMergeExport={handleMergeExport}
+              />
+            )}
+
+            {activePath === "direct" && (
+              <DirectVideoPathWorkspace
+                prompt={directPrompt}
+                modelId={directModelId}
+                duration={directDuration}
+                ratio={directRatio}
+                scene={scenes[0]}
+                error={directError}
+                onPromptChange={setDirectPrompt}
+                onModelChange={setDirectModelId}
+                onDurationChange={setDirectDuration}
+                onRatioChange={setDirectRatio}
+                onGenerate={handleDirectGenerate}
+                onGoStoryboard={() => {
+                  setActivePath("pipeline");
+                  setActiveStep("storyboard");
+                }}
+                onGoExport={() => {
+                  setActivePath("pipeline");
+                  setActiveStep("export");
+                }}
+              />
+            )}
+
+            {activePath === "upload" && (
+              <UploadVideoPathWorkspace
+                mode={uploadProcessMode}
+                scenes={scenes}
+                clips={localVideoClips}
+                composeSettings={composeSettings}
+                localTimelineExport={localTimelineExport}
+                localComposeStatus={localComposeStatus}
+                localComposeProgress={localComposeProgress}
+                localComposeError={localComposeError}
+                onModeChange={setUploadProcessMode}
+                onUploadVideos={handleUploadPathVideos}
+                onUpdateComposeSettings={updateComposeSettings}
+                onMergeExport={handleMergeExport}
+                onGoCompose={() => {
+                  setActivePath("pipeline");
+                  setActiveStep("compose");
+                }}
               />
             )}
           </div>
@@ -1063,75 +1461,567 @@ export default function StudioPage() {
           onToggle={() => setPropertiesCollapsed((value) => !value)}
           onExportFormatChange={setExportFormat}
           onUpdateSceneModel={updateSceneModel}
+          onUpdateScene={updateScene}
         />
       </div>
     </main>
+    </AuthGate>
   );
 }
 
-function ProjectSidebar() {
+function RecordContextBar({
+  projectName,
+  recordName,
+  recordUpdatedAt,
+  assetsLoading,
+  generatedVideoCount,
+  localClipCount,
+  hasTimelineExport,
+  exportFileName
+}: {
+  projectName: string;
+  recordName: string;
+  recordUpdatedAt?: string;
+  assetsLoading: boolean;
+  generatedVideoCount: number;
+  localClipCount: number;
+  hasTimelineExport: boolean;
+  exportFileName?: string;
+}) {
+  const updatedLabel = recordUpdatedAt
+    ? new Intl.DateTimeFormat("zh-CN", {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      }).format(new Date(recordUpdatedAt))
+    : "未同步";
+
+  const syncItems = [
+    `${generatedVideoCount} 个生成视频`,
+    `${localClipCount} 个本地素材`,
+    hasTimelineExport ? "MP4 成片已同步" : "未合成成片"
+  ];
+
   return (
-    <aside className="hidden border-r border-border bg-surface lg:block">
-      <div className="flex h-full flex-col p-4">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <Label>项目导航</Label>
-            <div className="mt-1 text-sm font-semibold">创作项目</div>
+    <div className="overflow-hidden rounded-2xl border border-white/8 bg-[linear-gradient(135deg,hsl(var(--elevated))_0%,hsl(var(--surface))_58%,rgba(34,211,238,0.06)_100%)] shadow-soft">
+      <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-1">
+              <Layers3 className="h-3 w-3" />
+              {projectName}
+            </span>
+            <ChevronRight className="h-3.5 w-3.5" />
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/12 px-2 py-1 text-primary">
+              <Film className="h-3 w-3" />
+              {recordName}
+            </span>
           </div>
-          <Button size="icon" variant="outline" aria-label="新建项目">
-            <Plus className="h-4 w-4" />
-          </Button>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <h2 className="max-w-[520px] truncate text-xl font-semibold tracking-normal text-foreground">
+              {recordName}
+            </h2>
+            <Badge tone={hasTimelineExport ? "green" : generatedVideoCount > 0 ? "purple" : "neutral"}>
+              {hasTimelineExport ? "已合成" : generatedVideoCount > 0 ? "生成中资产" : "草稿"}
+            </Badge>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+            {syncItems.map((item) => (
+              <span key={item} className="rounded-md border border-border/60 bg-background/40 px-2 py-1">
+                {item}
+              </span>
+            ))}
+          </div>
         </div>
 
-        <Button className="mb-4 w-full" variant="secondary">
-          <Plus className="h-4 w-4" />
-          新建项目
-        </Button>
-
-        <nav className="space-y-2" aria-label="项目列表">
-          <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-            <Folder className="h-3.5 w-3.5" />
-            项目列表
+        <div className="flex min-w-[220px] flex-col items-start gap-2 rounded-xl border border-border/60 bg-background/40 p-3 md:items-end">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            {assetsLoading ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                正在同步生成记录素材
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                记录素材已同步
+              </>
+            )}
           </div>
-          {projectItems.map((project) => (
-            <button
-              key={project.name}
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <Clock3 className="h-3 w-3" />
+            更新于 {updatedLabel}
+          </div>
+          {exportFileName && (
+            <div className="max-w-[260px] truncate text-[11px] text-emerald-300">
+              {exportFileName}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CreationPathSwitch({
+  activePath,
+  onChange
+}: {
+  activePath: CreationPath;
+  onChange: (path: CreationPath) => void;
+}) {
+  return (
+    <div className="grid w-full max-w-3xl grid-cols-3 gap-1 rounded-2xl border border-border/60 bg-elevated/80 p-1 shadow-soft">
+      {creationPaths.map((path) => {
+        const PathIcon = path.icon;
+        const active = activePath === path.id;
+        return (
+          <button
+            key={path.id}
+            type="button"
+            onClick={() => onChange(path.id)}
+            className={cn(
+              "group grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-primary/40 lg:px-3",
+              active
+                ? "bg-[linear-gradient(135deg,rgba(124,58,237,0.24),rgba(34,211,238,0.10))] text-primary shadow-glow-sm ring-1 ring-primary/20"
+                : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+            )}
+          >
+            <span
               className={cn(
-                "w-full rounded-lg border p-3 text-left transition hover:border-primary/60",
-                project.active ? "border-primary bg-primary/[0.07]" : "border-border bg-background"
+                "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border",
+                active
+                  ? "border-primary/40 bg-primary/15 text-primary"
+                  : "border-border bg-background text-muted-foreground group-hover:text-foreground"
               )}
             >
-              <div className="flex items-start gap-3">
-                <FolderOpen className={cn("mt-0.5 h-4 w-4", project.active ? "text-primary" : "text-muted-foreground")} />
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold">{project.name}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">{project.meta}</div>
-                </div>
-              </div>
+              <PathIcon className="h-4 w-4" />
+            </span>
+            <span className="min-w-0 leading-tight">
+              <span className="block truncate font-semibold">{path.label}</span>
+              <span className="hidden truncate text-[11px] text-muted-foreground xl:block">{path.description}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function PipelineStepNav({
+  activeStep,
+  completedByStep,
+  runningByStep,
+  onStepSelect
+}: {
+  activeStep: StudioStep;
+  completedByStep: Record<StudioStep, boolean>;
+  runningByStep: Record<StudioStep, boolean>;
+  onStepSelect: (step: StudioStep) => void;
+}) {
+  return (
+    <div className="grid w-full grid-cols-2 gap-1 rounded-2xl border border-border/60 bg-elevated/70 p-1.5 shadow-soft sm:grid-cols-4">
+      {pipelineSteps.map((step, index) => {
+        const completed = completedByStep[step.id];
+        const running = runningByStep[step.id] || (activeStep === step.id && !completed);
+        return (
+          <div key={step.id} className="min-w-0">
+            <button
+              type="button"
+              onClick={() => onStepSelect(step.id)}
+              className={cn(
+                "flex h-10 w-full min-w-0 items-center gap-2 rounded-xl px-2.5 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-primary/40 lg:px-3",
+                activeStep === step.id
+                  ? "bg-primary/15 text-primary shadow-glow-sm"
+                  : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+              )}
+            >
+              <span
+                className={cn(
+                  "flex h-6 w-6 items-center justify-center rounded-full border text-xs font-semibold",
+                  completed
+                    ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+                    : running
+                      ? "border-primary/40 bg-primary/15 text-primary"
+                      : "border-border/80 bg-background text-muted-foreground"
+                )}
+              >
+                {completed ? (
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                ) : running ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  step.number
+                )}
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate font-semibold">{step.label}</span>
+                <span className="hidden truncate text-[11px] text-muted-foreground lg:block">
+                  {step.description}
+                </span>
+              </span>
             </button>
-          ))}
-        </nav>
-
-        <div className="mt-5 rounded-lg border border-border p-3">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-medium text-muted-foreground">Render Budget</span>
-            <span className="font-semibold">$12.80</span>
           </div>
-          <Progress value={44} className="mt-3" />
-          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-            <span>Quality</span>
-            <span className="text-right text-foreground">High</span>
-            <span>Fallback</span>
-            <span className="text-right text-foreground">Enabled</span>
-          </div>
-        </div>
+        );
+      })}
+    </div>
+  );
+}
 
-        <button className="mt-auto flex w-full items-center gap-3 rounded-lg border border-border bg-background p-3 text-left text-sm text-muted-foreground transition hover:border-primary/60 hover:text-foreground">
-          <Trash2 className="h-4 w-4" />
-          回收站
-        </button>
-      </div>
-    </aside>
+function DirectVideoPathWorkspace({
+  prompt,
+  modelId,
+  duration,
+  ratio,
+  scene,
+  error,
+  onPromptChange,
+  onModelChange,
+  onDurationChange,
+  onRatioChange,
+  onGenerate,
+  onGoStoryboard,
+  onGoExport
+}: {
+  prompt: string;
+  modelId: string;
+  duration: string;
+  ratio: PreviewRatio;
+  scene?: StudioScene;
+  error: string;
+  onPromptChange: (value: string) => void;
+  onModelChange: (value: string) => void;
+  onDurationChange: (value: string) => void;
+  onRatioChange: (value: PreviewRatio) => void;
+  onGenerate: () => void;
+  onGoStoryboard: () => void;
+  onGoExport: () => void;
+}) {
+  const selectedVersion = scene?.selectedVersionId
+    ? scene.versions.find((version) => version.id === scene.selectedVersionId)
+    : scene?.versions.at(-1);
+  const isGenerating = scene?.status === "queued" || scene?.status === "rendering";
+  const isReady = scene?.status === "done";
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+      <Card>
+        <CardHeader>
+          <CardTitle>提示词直出视频</CardTitle>
+          <div className="mt-1 text-xs text-muted-foreground">跳过脚本拆解，直接把一句视频需求送入视频模型。</div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <div className="flex items-center justify-between">
+              <Label>视频提示词</Label>
+              <span className="text-[11px] text-muted-foreground">{prompt.length}/500</span>
+            </div>
+            <Textarea
+              className="mt-2 min-h-36"
+              maxLength={500}
+              value={prompt}
+              onChange={(event) => onPromptChange(event.target.value)}
+              placeholder="例如：清晨的创作者工作台，一束冷光照亮产品，镜头缓慢推进，质感专业克制。"
+            />
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div>
+              <Label>视频模型</Label>
+              <Select className="mt-2" value={modelId} onChange={(event) => onModelChange(event.target.value)}>
+                {videoModels.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Label>时长</Label>
+              <Select className="mt-2" value={duration} onChange={(event) => onDurationChange(event.target.value)}>
+                <option value="5">5s</option>
+                <option value="10">10s</option>
+                <option value="15">15s</option>
+              </Select>
+            </div>
+            <div>
+              <Label>比例</Label>
+              <Select className="mt-2" value={ratio} onChange={(event) => onRatioChange(event.target.value as PreviewRatio)}>
+                <option value="9:16">9:16 竖版</option>
+                <option value="16:9">16:9 横版</option>
+              </Select>
+            </div>
+          </div>
+
+          {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</div>}
+
+          <Button className="w-full" onClick={onGenerate} disabled={isGenerating}>
+            {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {isGenerating ? "生成中" : "直接生成视频"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <div>
+            <CardTitle>直出结果</CardTitle>
+            <div className="mt-1 text-xs text-muted-foreground">结果会保存为当前生成记录的一条单镜视频。</div>
+          </div>
+          <Badge tone={isReady ? "green" : isGenerating ? "purple" : "neutral"}>
+            {scene ? sceneStatusLabel[scene.status] : "待生成"}
+          </Badge>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <VideoFrame
+            className={ratio === "9:16" ? "mx-auto max-h-[420px] max-w-[240px] aspect-[9/16]" : ""}
+            thumbnailClass={selectedVersion?.thumbnailClass ?? scene?.thumbnailClass ?? "bg-[linear-gradient(135deg,#111827,#22d3ee_50%,#8b5cf6)]"}
+            label={isReady ? "DIRECT READY" : isGenerating ? "GENERATING" : "DIRECT"}
+          />
+          {scene && (
+            <div className="rounded-lg border border-border bg-background p-3">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{scene.modelId}</span>
+                <span>{scene.progress}%</span>
+              </div>
+              <Progress value={scene.progress} className="mt-2" />
+              <div className="mt-3 text-sm leading-6 text-muted-foreground">{scene.prompt}</div>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={onGoStoryboard}>
+              查看模型参数
+            </Button>
+            <Button onClick={onGoExport} disabled={!isReady}>
+              <Download className="h-4 w-4" />
+              去导出
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function UploadVideoPathWorkspace({
+  mode,
+  scenes,
+  clips,
+  composeSettings,
+  localTimelineExport,
+  localComposeStatus,
+  localComposeProgress,
+  localComposeError,
+  onModeChange,
+  onUploadVideos,
+  onUpdateComposeSettings,
+  onMergeExport,
+  onGoCompose
+}: {
+  mode: string;
+  scenes: StudioScene[];
+  clips: Record<string, LocalVideoClip>;
+  composeSettings: ComposeSettings;
+  localTimelineExport: LocalTimelineExport | null;
+  localComposeStatus: LocalComposeStatus;
+  localComposeProgress: number;
+  localComposeError: string;
+  onModeChange: (value: string) => void;
+  onUploadVideos: (files: FileList | File[] | null | undefined) => void;
+  onUpdateComposeSettings: (patch: Partial<ComposeSettings>) => void;
+  onMergeExport: () => void;
+  onGoCompose: () => void;
+}) {
+  const modes = ["智能裁剪", "加字幕", "配乐重包装", "平台比例适配"];
+  const uploadedScenes = scenes.filter((scene) => Boolean(clips[scene.id]));
+  const firstClip = uploadedScenes[0] ? clips[uploadedScenes[0].id] : undefined;
+  const clipCount = uploadedScenes.length;
+  const totalDuration = uploadedScenes.reduce((total, scene) => total + (clips[scene.id]?.duration ?? scene.duration), 0);
+  const totalSize = uploadedScenes.reduce((total, scene) => total + (clips[scene.id]?.size ?? 0), 0);
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+      <Card>
+        <CardHeader>
+          <CardTitle>上传视频处理</CardTitle>
+          <div className="mt-1 text-xs text-muted-foreground">一次选择多个本地视频，按上传顺序写入时间轴并合成为一个 MP4。</div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <label className="flex min-h-44 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-cyan-400/35 bg-cyan-400/8 p-6 text-center transition hover:bg-cyan-400/12">
+            <Upload className="h-7 w-7 text-cyan-200" />
+            <span className="text-sm font-semibold">{clipCount ? "重新选择多个视频" : "选择多个本地视频"}</span>
+            <span className="max-w-sm text-xs leading-5 text-muted-foreground">
+              支持多选。上传后每个视频会成为一条独立片段，保存在当前生成记录里，并按顺序进入合成时间轴。
+            </span>
+            <input
+              type="file"
+              accept="video/*"
+              multiple
+              className="sr-only"
+              onChange={(event) => {
+                onUploadVideos(event.target.files);
+                event.currentTarget.value = "";
+              }}
+            />
+          </label>
+
+          {clipCount > 0 && (
+            <div className="grid gap-3 rounded-xl border border-border bg-background p-3 text-sm sm:grid-cols-3">
+              <div>
+                <div className="text-[11px] text-muted-foreground">片段数量</div>
+                <div className="mt-1 font-semibold">{clipCount} 个视频</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-muted-foreground">总时长</div>
+                <div className="mt-1 font-semibold">{totalDuration.toFixed(1)}s</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-muted-foreground">素材大小</div>
+                <div className="mt-1 font-semibold">{formatBytes(totalSize)}</div>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <Label>处理方式</Label>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {modes.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => onModeChange(item)}
+                  className={cn(
+                    "rounded-lg border px-3 py-2 text-left text-sm transition",
+                    mode === item
+                      ? "border-primary/45 bg-primary/12 text-primary"
+                      : "border-border bg-background text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <Label>目标比例</Label>
+              <Select
+                className="mt-2"
+                value={composeSettings.ratio}
+                onChange={(event) => onUpdateComposeSettings({ ratio: event.target.value as PreviewRatio })}
+              >
+                <option value="9:16">9:16 竖版</option>
+                <option value="16:9">16:9 横版</option>
+              </Select>
+            </div>
+            <div>
+              <Label>导出规格</Label>
+              <Select
+                className="mt-2"
+                value={composeSettings.exportProfile}
+                onChange={(event) =>
+                  onUpdateComposeSettings({ exportProfile: event.target.value as ComposeSettings["exportProfile"] })
+                }
+              >
+                {exportProfiles.map((profile) => (
+                  <option key={profile.value} value={profile.value}>
+                    {profile.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <div>
+            <CardTitle>处理预览</CardTitle>
+            <div className="mt-1 text-xs text-muted-foreground">多段视频会按列表顺序合成，也可以打开完整时间轴继续排序和裁剪。</div>
+          </div>
+          <Badge tone={clipCount ? "green" : "neutral"}>{clipCount ? `${clipCount} 段已载入` : "待上传"}</Badge>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {firstClip ? (
+            <div className="overflow-hidden rounded-xl border border-border bg-background">
+              <video src={firstClip.url} className="aspect-video w-full bg-black object-contain" controls />
+              <div className="grid gap-3 p-3 text-xs text-muted-foreground sm:grid-cols-3">
+                <span className="truncate">{firstClip.name}</span>
+                <span>{firstClip.duration.toFixed(1)}s</span>
+                <span>{formatBytes(firstClip.size)}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="flex aspect-video items-center justify-center rounded-xl border border-border bg-background text-sm text-muted-foreground">
+              上传后在这里预览第一段原视频
+            </div>
+          )}
+
+          {uploadedScenes.length > 0 && (
+            <div className="space-y-2">
+              {uploadedScenes.map((scene) => {
+                const clip = clips[scene.id];
+                return (
+                  <div key={scene.id} className="rounded-lg border border-border bg-background p-3 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold">
+                          #{scene.index} {clip?.name ?? scene.title}
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {(clip?.duration ?? scene.duration).toFixed(1)}s · {clip ? formatBytes(clip.size) : "等待载入"}
+                        </div>
+                      </div>
+                      <Badge tone="green">时间轴片段</Badge>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {localComposeError && (
+            <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100">
+              {localComposeError}
+            </div>
+          )}
+
+          {localComposeStatus === "merging" && (
+            <div>
+              <div className="mb-2 flex justify-between text-xs text-muted-foreground">
+                <span>合成处理中</span>
+                <span>{localComposeProgress}%</span>
+              </div>
+              <Progress value={localComposeProgress} />
+            </div>
+          )}
+
+          {localTimelineExport && (
+            <a
+              href={localTimelineExport.url}
+              download={localTimelineExport.fileName}
+              className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-emerald-700 px-3 text-sm font-medium text-white hover:bg-emerald-800"
+            >
+              <Download className="h-4 w-4" />
+              下载处理后视频
+            </a>
+          )}
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Button onClick={onMergeExport} disabled={!clipCount || localComposeStatus === "merging"}>
+              {localComposeStatus === "merging" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Scissors className="h-4 w-4" />}
+              一键处理成片
+            </Button>
+            <Button variant="outline" onClick={onGoCompose} disabled={!clipCount}>
+              打开完整时间轴
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -1147,34 +2037,35 @@ function WorkspaceSummary({
   exportFormat: string;
 }) {
   return (
-    <div className="grid gap-4 md:grid-cols-3">
-      <Card>
-        <CardContent className="flex items-center justify-between">
+    <div className="grid gap-3 md:grid-cols-3">
+      <Card className="border-cyan-400/15 bg-gradient-to-br from-cyan-400/10 to-transparent">
+        <CardContent className="flex items-center justify-between py-4">
           <div>
-            <div className="text-xs text-muted-foreground">Scenes</div>
-            <div className="mt-1 text-2xl font-semibold">
-              {finishedScenes}/{totalScenes}
+            <div className="text-[11px] text-muted-foreground">分镜完成</div>
+            <div className="mt-1 text-2xl font-semibold tabular-nums">
+              {finishedScenes}
+              <span className="text-lg text-muted-foreground">/{totalScenes}</span>
             </div>
           </div>
-          <Clapperboard className="h-5 w-5 text-primary" />
+          <Clapperboard className="h-5 w-5 text-cyan-300" />
         </CardContent>
       </Card>
-      <Card>
-        <CardContent className="flex items-center justify-between">
+      <Card className="border-violet-400/15 bg-gradient-to-br from-violet-400/10 to-transparent">
+        <CardContent className="flex items-center justify-between py-4">
           <div>
-            <div className="text-xs text-muted-foreground">Render Progress</div>
-            <div className="mt-1 text-2xl font-semibold">{renderProgress}%</div>
+            <div className="text-[11px] text-muted-foreground">生成进度</div>
+            <div className="mt-1 text-2xl font-semibold tabular-nums">{renderProgress}%</div>
           </div>
-          <MonitorPlay className="h-5 w-5 text-violet-600" />
+          <MonitorPlay className="h-5 w-5 text-violet-300" />
         </CardContent>
       </Card>
-      <Card>
-        <CardContent className="flex items-center justify-between">
+      <Card className="border-amber-500/15 bg-gradient-to-br from-amber-500/8 to-transparent">
+        <CardContent className="flex items-center justify-between py-4">
           <div>
-            <div className="text-xs text-muted-foreground">Export Profile</div>
-            <div className="mt-1 break-words text-xl font-semibold sm:text-2xl">{exportFormat}</div>
+            <div className="text-[11px] text-muted-foreground">导出规格</div>
+            <div className="mt-1 break-words text-lg font-semibold sm:text-xl">{exportFormat}</div>
           </div>
-          <Scissors className="h-5 w-5 text-amber-600" />
+          <Scissors className="h-5 w-5 text-amber-400" />
         </CardContent>
       </Card>
     </div>
@@ -1254,7 +2145,7 @@ function ScriptWorkspace({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const styleOptions = ["科普", "剧情", "口播", "Vlog", "广告", "剧情反转"];
+  const styleOptions = ["科普", "剧情", "口播", "生活记录", "广告", "剧情反转"];
 
   return (
     <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
@@ -1265,7 +2156,7 @@ function ScriptWorkspace({
             <div className="mt-1 text-xs text-muted-foreground">输入主题与模型参数，生成结构化分镜</div>
           </div>
           <Badge tone={scriptStatus === "ready" ? "green" : scriptStatus === "generating" ? "purple" : "neutral"}>
-            {scriptStatus === "ready" ? "ready" : scriptStatus}
+            {scriptStatusLabel[scriptStatus]}
           </Badge>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1350,7 +2241,7 @@ function ScriptWorkspace({
                 <option>抖音</option>
                 <option>视频号</option>
                 <option>小红书</option>
-                <option>YouTube Shorts</option>
+                <option>海外短视频</option>
               </Select>
             </div>
             <div>
@@ -1378,7 +2269,7 @@ function ScriptWorkspace({
             >
               {llmModels.map((model) => (
                 <option key={model.id} value={model.id}>
-                  {model.name} · 约 {model.estimatedTokens.toLocaleString("zh-CN")} Token
+                  {model.name} · 约 {model.estimatedTokens.toLocaleString("zh-CN")} 词元
                 </option>
               ))}
             </Select>
@@ -1396,7 +2287,7 @@ function ScriptWorkspace({
               <div className="space-y-4 border-t border-border p-3">
                 <div>
                   <div className="flex items-center justify-between">
-                    <Label>Temperature</Label>
+                    <Label>创意温度</Label>
                     <span className="text-xs font-semibold">{temperature.toFixed(2)}</span>
                   </div>
                   <input
@@ -1410,7 +2301,7 @@ function ScriptWorkspace({
                   />
                 </div>
                 <div>
-                  <Label htmlFor="max-tokens">Max Tokens</Label>
+                  <Label htmlFor="max-tokens">最大词元数</Label>
                   <Input
                     id="max-tokens"
                     type="number"
@@ -1422,7 +2313,7 @@ function ScriptWorkspace({
                   />
                 </div>
                 <div>
-                  <Label htmlFor="system-prompt">System Prompt</Label>
+                  <Label htmlFor="system-prompt">系统提示词</Label>
                   <Textarea
                     id="system-prompt"
                     value={systemPrompt}
@@ -1437,7 +2328,7 @@ function ScriptWorkspace({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Route className="h-3.5 w-3.5" />
-              Model config injected by Admin Console
+              模型配置由运营后台统一注入
             </div>
             <Button onClick={onGenerateScript} disabled={scriptStatus === "generating" || brief.trim().length === 0}>
               {scriptStatus === "generating" ? (
@@ -1513,7 +2404,7 @@ function ScriptWorkspace({
                           <div className="truncate text-sm font-semibold">{scene.title}</div>
                         </div>
                         <div className="mt-1 text-xs text-muted-foreground">
-                          Visual Prompt will be sent to video generation
+                          画面提示词会发送到视频生成模型
                         </div>
                       </div>
                     </div>
@@ -1539,7 +2430,7 @@ function ScriptWorkspace({
 
                   <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)_96px]">
                     <div>
-                      <Label>画面描述 (Visual Prompt)</Label>
+                      <Label>画面描述（视觉提示词）</Label>
                       {editing ? (
                         <Textarea
                           value={scene.prompt}
@@ -1705,13 +2596,13 @@ function StoryboardWorkspace({
                       </span>
                       <span className="text-sm font-semibold">{scene.title}</span>
                     </div>
-                    <div className="mt-1 text-xs text-muted-foreground">来自 Step 1，可微调 Visual Prompt</div>
+                    <div className="mt-1 text-xs text-muted-foreground">来自第 1 步，可微调视觉提示词</div>
                   </div>
                   {renderStatusBadge(scene.status, scene.progress)}
                 </div>
 
                 <div>
-                  <Label>画面描述 (Visual Prompt)</Label>
+                  <Label>画面描述（视觉提示词）</Label>
                   <Textarea
                     value={scene.prompt}
                     onChange={(event) => onUpdateScene(scene.id, { prompt: event.target.value })}
@@ -1747,7 +2638,7 @@ function StoryboardWorkspace({
                   >
                     <VideoFrame
                       thumbnailClass={selectedVersion.thumbnailClass}
-                      label={`VERSION ${selectedVersion.label}`}
+                      label={`版本 ${selectedVersion.label}`}
                       className="shadow-soft"
                     />
                   </button>
@@ -1783,7 +2674,9 @@ function StoryboardWorkspace({
                     <div className="text-sm font-semibold">视频生成配置</div>
                     <div className="text-xs text-muted-foreground">独立任务 · {selectedModel.vendor}</div>
                   </div>
-                  <Badge tone={selectedModel.status === "online" ? "green" : "amber"}>{selectedModel.status}</Badge>
+                  <Badge tone={selectedModel.status === "online" ? "green" : "amber"}>
+                    {selectedModel.status === "online" ? "在线" : selectedModel.status === "degraded" ? "降级" : "离线"}
+                  </Badge>
                 </div>
 
                 <div className="space-y-4">
@@ -2020,7 +2913,7 @@ function PreviewModal({
           <div>
             <div className="text-sm font-semibold">视频预览 · #{scene.index}</div>
             <div className="mt-1 text-xs text-muted-foreground">
-              Version {selectedVersion?.label ?? "-"} · {videoModels.find((model) => model.id === scene.modelId)?.name}
+              版本 {selectedVersion?.label ?? "-"} · {videoModels.find((model) => model.id === scene.modelId)?.name}
             </div>
           </div>
           <Button size="icon" variant="ghost" onClick={onClose} aria-label="关闭视频预览">
@@ -2030,7 +2923,7 @@ function PreviewModal({
         <div className="p-4">
           <VideoFrame
             thumbnailClass={selectedVersion?.thumbnailClass ?? scene.thumbnailClass}
-            label="VIDEO PREVIEW"
+            label="视频预览"
             className="shadow-soft"
           />
           <p className="mt-4 text-sm leading-6 text-muted-foreground">{scene.prompt}</p>
@@ -2057,6 +2950,9 @@ function ComposeWorkspace({
   onUpdateSceneTrim,
   onUpdateSceneTransition,
   onReorderTimeline,
+  onUpdateScene,
+  onAppendScene,
+  onDeleteScene,
   onUploadLocalVideo,
   onRemoveLocalVideo,
   onMergeExport,
@@ -2078,12 +2974,19 @@ function ComposeWorkspace({
   onUpdateSceneTrim: (sceneId: string, patch: Partial<{ start: number; end: number }>) => void;
   onUpdateSceneTransition: (sceneId: string, transition: TimelineTransition) => void;
   onReorderTimeline: (fromIndex: number, toIndex: number) => void;
+  onUpdateScene: (
+    sceneId: string,
+    patch: Partial<Pick<ReturnType<typeof useStudioStore.getState>["scenes"][number], "narration">>
+  ) => void;
+  onAppendScene: () => void;
+  onDeleteScene: (sceneId: string) => void;
   onUploadLocalVideo: (sceneId: string, file: File | null | undefined) => void;
   onRemoveLocalVideo: (sceneId: string) => void;
   onMergeExport: () => void;
   onGoExport: () => void;
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [previewSceneIndex, setPreviewSceneIndex] = useState(0);
   const orderedScenes = composeSettings.timelineOrder
     .map((sceneId) => scenes.find((scene) => scene.id === sceneId))
     .filter((scene): scene is ReturnType<typeof useStudioStore.getState>["scenes"][number] => Boolean(scene));
@@ -2091,14 +2994,33 @@ function ComposeWorkspace({
     composeSelection.type === "video"
       ? scenes.find((scene) => scene.id === composeSelection.sceneId)
       : orderedScenes[0];
-  const previewScene = selectedScene ?? orderedScenes[0] ?? scenes[0];
+  const selectedSceneIndex = selectedScene
+    ? Math.max(0, orderedScenes.findIndex((scene) => scene.id === selectedScene.id))
+    : 0;
+  const activePreviewIndex = composeSettings.previewPlaying ? previewSceneIndex : selectedSceneIndex;
+  const previewScene = orderedScenes[activePreviewIndex] ?? selectedScene ?? orderedScenes[0] ?? scenes[0];
   const previewClip = previewScene ? localVideoClips[previewScene.id] : undefined;
+  const previewVideoUrl = localTimelineExport?.url ?? previewClip?.url;
+  const hasSceneGeneration = Boolean(previewScene?.versions.some((version) => version.status === "done"));
+  const previewSourceLabel = localTimelineExport
+    ? "合成成片"
+    : previewClip
+      ? "真实视频片段"
+      : hasSceneGeneration
+        ? "已生成记录，等待真实视频文件"
+        : "等待真实视频素材";
+  const hasAnyPreviewVideo = Boolean(localTimelineExport) || orderedScenes.some((scene) => Boolean(localVideoClips[scene.id]));
   const uploadedClipCount = Object.keys(localVideoClips).length;
   const timelineSeconds = orderedScenes.reduce((total, scene) => {
     const clip = localVideoClips[scene.id];
     const trim = composeSettings.trims[scene.id] ?? { start: 0, end: clip?.duration ?? scene.duration };
     return total + Math.max(1, trim.end - trim.start);
   }, 0);
+  const exportDimension = getExportDimensions(composeSettings.exportProfile, composeSettings.ratio);
+
+  useEffect(() => {
+    setPreviewSceneIndex((index) => Math.min(index, Math.max(orderedScenes.length - 1, 0)));
+  }, [orderedScenes.length]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -2106,7 +3028,7 @@ function ComposeWorkspace({
         <CardHeader className="flex flex-row items-center justify-between gap-3">
           <div>
             <CardTitle>视频合成</CardTitle>
-            <div className="mt-1 text-xs text-muted-foreground">简化轨道式时间轴，触发后端 ffmpeg 合成任务</div>
+            <div className="mt-1 text-xs text-muted-foreground">简化轨道式时间轴，触发后端视频合成任务</div>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -2126,94 +3048,178 @@ function ComposeWorkspace({
           </div>
         </CardHeader>
         <CardContent>
-          <div
-            role="button"
-            tabIndex={0}
-            className="mx-auto block w-full max-w-4xl text-left"
-            onClick={() => onSelectComposeElement({ type: "preview" })}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+            <div
+              role="button"
+              tabIndex={0}
+              className="block w-full text-left"
+              onClick={(event) => {
+                if (event.target instanceof HTMLVideoElement) {
+                  return;
+                }
                 onSelectComposeElement({ type: "preview" });
-              }
-            }}
-          >
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  onSelectComposeElement({ type: "preview" });
+                }
+              }}
+            >
             <div
               className={cn(
                 "frame-noise relative mx-auto overflow-hidden rounded-lg border border-white/40 shadow-soft",
                 composeSettings.ratio === "9:16" ? "aspect-[9/16] max-h-[560px]" : "aspect-video",
-                previewScene?.thumbnailClass ?? "bg-[linear-gradient(135deg,#2f4858,#1f9d8a_54%,#f6c85f)]"
+                previewVideoUrl ? "bg-black" : "bg-background"
               )}
             >
-              {previewClip && (
+              {previewVideoUrl ? (
                 <video
-                  key={previewClip.url}
-                  src={previewClip.url}
+                  key={previewVideoUrl}
+                  src={previewVideoUrl}
                   className="absolute inset-0 h-full w-full bg-black object-contain"
                   controls
                   muted={composeSettings.previewPlaying}
                   autoPlay={composeSettings.previewPlaying}
-                  loop
+                  loop={!localTimelineExport}
                   playsInline
                 />
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-[radial-gradient(circle_at_50%_35%,rgba(168,85,247,0.16),transparent_36%),#09090f] px-6 text-center">
+                  <Film className="h-10 w-10 text-muted-foreground/70" />
+                  <div className="mt-4 text-sm font-semibold text-foreground">暂无可播放的真实视频</div>
+                  <p className="mt-2 max-w-md text-xs leading-5 text-muted-foreground">
+                    上传本地视频或完成真实合成后，这里会直接播放对应的视频文件，不再使用预制占位画面。
+                  </p>
+                </div>
               )}
-              <div className="absolute inset-x-4 top-4 z-10 flex items-center justify-between">
+              <div className="pointer-events-none absolute inset-x-4 top-4 z-10 flex items-center justify-between">
                 <span className="rounded bg-black/32 px-2 py-1 text-[11px] font-medium text-white/90">
                   {composeSettings.ratio === "9:16" ? "1080×1920" : "1920×1080"}
                 </span>
                 <span className="rounded bg-white/20 px-2 py-1 text-[11px] font-medium text-white/90">
-                  {composeSettings.previewPlaying ? "LIVE PREVIEW" : "PAUSED"}
+                  {previewSourceLabel}
                 </span>
               </div>
-              <div className="absolute inset-0 z-10 grid grid-cols-3 grid-rows-3 opacity-25">
-                {Array.from({ length: 9 }).map((_, index) => (
-                  <span key={index} className="border border-white/30" />
-                ))}
+              {previewVideoUrl && (
+                <>
+                  <div
+                    className={cn(
+                      "pointer-events-none absolute inset-x-6 z-20 rounded-md bg-black/36 px-4 py-2 text-center text-white",
+                      composeSettings.subtitlePosition === "top" && "top-16",
+                      composeSettings.subtitlePosition === "middle" && "top-1/2 -translate-y-1/2",
+                      composeSettings.subtitlePosition === "bottom" && "bottom-16"
+                    )}
+                    style={{
+                      color: composeSettings.subtitleColor,
+                      fontSize: Math.max(18, composeSettings.subtitleFontSize / 2)
+                    }}
+                  >
+                    {previewScene?.narration ?? "自动字幕预览"}
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-background p-3">
+              <div className="text-xs text-muted-foreground">
+                预览片段 {Math.min(activePreviewIndex + 1, orderedScenes.length || 1)}/{orderedScenes.length || 1}
+                {previewScene ? ` · #${previewScene.index} ${previewScene.title}` : ""}
               </div>
-              <div
-                className={cn(
-                  "absolute inset-x-6 z-20 rounded-md bg-black/36 px-4 py-2 text-center text-white",
-                  composeSettings.subtitlePosition === "top" && "top-16",
-                  composeSettings.subtitlePosition === "middle" && "top-1/2 -translate-y-1/2",
-                  composeSettings.subtitlePosition === "bottom" && "bottom-16"
-                )}
-                style={{
-                  color: composeSettings.subtitleColor,
-                  fontSize: Math.max(18, composeSettings.subtitleFontSize / 2)
-                }}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={orderedScenes.length <= 1}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setPreviewSceneIndex((index) => (index - 1 + orderedScenes.length) % orderedScenes.length);
+                  }}
+                >
+                  上一段
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={!hasAnyPreviewVideo}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setPreviewSceneIndex(activePreviewIndex);
+                    onUpdateComposeSettings({ previewPlaying: !composeSettings.previewPlaying });
+                  }}
+                >
+                  <Play className="h-3.5 w-3.5 fill-current" />
+                  {composeSettings.previewPlaying ? "暂停预览" : "播放预览"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={orderedScenes.length <= 1}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setPreviewSceneIndex((index) => (index + 1) % orderedScenes.length);
+                  }}
+                >
+                  下一段
+                </Button>
+              </div>
+            </div>
+            </div>
+
+            <div className="flex flex-col gap-3 rounded-xl border border-border bg-background p-4">
+              <div>
+                <div className="text-sm font-semibold">合成操作</div>
+                <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                  {uploadedClipCount}/{orderedScenes.length} 个本地视频 · 预计 {Math.round(timelineSeconds)}s
+                </div>
+              </div>
+              <Select
+                value={composeSettings.exportProfile}
+                onChange={(event) =>
+                  onUpdateComposeSettings({ exportProfile: event.target.value as ComposeSettings["exportProfile"] })
+                }
               >
-                {previewScene?.narration ?? "自动字幕预览"}
+                {exportProfiles.map((profile) => (
+                  <option key={profile.value} value={profile.value}>
+                    {profile.label}
+                  </option>
+                ))}
+              </Select>
+              <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs leading-5 text-muted-foreground">
+                当前输出：{exportDimension.width}×{exportDimension.height}
               </div>
-              <div className="absolute inset-x-6 bottom-5 z-20 flex items-center gap-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-foreground">
-                  <Play className="h-4 w-4 fill-current" />
-                </span>
-                <span className="h-1.5 flex-1 rounded-full bg-white/32">
-                  <span
-                    className="block h-full rounded-full bg-white transition-all"
-                    style={{ width: `${exportStatus === "merging" ? exportProgress : 38}%` }}
-                  />
-                </span>
+              <label className="flex h-9 items-center justify-between gap-3 rounded-md border border-border bg-surface px-3 text-sm">
+                <span>水印</span>
+                <input
+                  type="checkbox"
+                  checked={composeSettings.watermark}
+                  onChange={(event) => onUpdateComposeSettings({ watermark: event.target.checked })}
+                  className="h-4 w-4 accent-teal-700"
+                />
+              </label>
+              <Button onClick={onMergeExport} disabled={localComposeStatus === "merging" || (!allScenesDone && exportStatus !== "ready")}>
+                {exportStatus === "merging" || localComposeStatus === "merging" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Scissors className="h-4 w-4" />
+                )}
+                {uploadedClipCount ? "合成本地视频" : "一键合成"}
+              </Button>
+              <Button variant="outline" onClick={onGoExport}>
+                <Download className="h-4 w-4" />
+                前往导出
+              </Button>
+              <div className="rounded-lg border border-border bg-surface p-3 text-xs leading-5 text-muted-foreground">
+                状态：{localComposeStatus === "ready" ? "可下载" : localComposeStatus === "merging" ? "合成中" : localComposeStatus === "error" ? "失败" : "待合成"}
               </div>
             </div>
           </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <MetricPanel label="本地视频" value={`${uploadedClipCount}/${orderedScenes.length}`} detail="已上传片段" />
-            <MetricPanel
-              label="合成状态"
-              value={localComposeStatus === "ready" ? "可下载" : localComposeStatus === "merging" ? "合成中" : localComposeStatus === "error" ? "失败" : "待合成"}
-              detail="浏览器本地渲染"
-            />
-            <MetricPanel label="预计时长" value={`${Math.round(timelineSeconds)}s`} detail="按裁剪后时间轴" />
-          </div>
           {localTimelineExport && (
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">
               <span>
                 本地合成文件已生成：{formatBytes(localTimelineExport.size)} · {Math.round(localTimelineExport.duration)}s · {localTimelineExport.createdAt}
               </span>
               <a
                 href={localTimelineExport.url}
                 download={localTimelineExport.fileName}
-                className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-emerald-700 px-3 text-xs font-medium text-white hover:bg-emerald-800"
+                className="inline-flex h-8 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 text-xs font-medium text-white hover:bg-emerald-500"
               >
                 <Download className="h-3.5 w-3.5" />
                 下载合成视频
@@ -2233,7 +3239,7 @@ function ComposeWorkspace({
           <div>
             <CardTitle>时间轴</CardTitle>
             <div className="mt-1 text-xs text-muted-foreground">
-              {orderedScenes.length} clips · {timelineSeconds}s · 视频/音频/字幕/配音轨
+              {orderedScenes.length} 个片段 · {timelineSeconds}s · 视频/音频/字幕/配音轨
             </div>
           </div>
           <Badge tone={allScenesDone ? "green" : "amber"}>
@@ -2338,34 +3344,105 @@ function ComposeWorkspace({
                           移除
                         </Button>
                       )}
+                      {orderedScenes.length > 1 && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onRemoveLocalVideo(scene.id);
+                            onDeleteScene(scene.id);
+                          }}
+                        >
+                          删除片段
+                        </Button>
+                      )}
                     </div>
                   </div>
                 );
               })}
+              <button
+                type="button"
+                onClick={onAppendScene}
+                className="flex w-48 shrink-0 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-primary/45 bg-primary/5 p-4 text-sm font-medium text-primary transition hover:bg-primary/10"
+              >
+                <Plus className="h-5 w-5" />
+                添加视频位
+                <span className="text-xs font-normal text-muted-foreground">添加到视频轨末尾</span>
+              </button>
             </div>
           </TimelineTrack>
 
           <TimelineTrack label="音频轨" icon={<Music className="h-4 w-4" />}>
-            <button
+            <div
               onClick={() => onSelectComposeElement({ type: "audio" })}
               className={cn(
-                "grid w-full gap-3 rounded-lg border p-3 text-left md:grid-cols-[180px_1fr_160px]",
+                "grid w-full gap-3 rounded-lg border p-3 text-left md:grid-cols-[180px_minmax(0,1fr)_220px]",
                 composeSelection.type === "audio" ? "border-primary bg-primary/[0.06]" : "border-border bg-surface"
               )}
             >
-              <div className="text-sm font-semibold">
-                {composeSettings.bgmMode === "upload" ? composeSettings.bgmFileName || "BGM 上传" : composeSettings.musicLibraryTrack}
+              <div>
+                <div className="text-xs text-muted-foreground">音频来源</div>
+                <Select
+                  className="mt-2 h-8"
+                  value={composeSettings.bgmMode}
+                  onChange={(event) =>
+                    onUpdateComposeSettings({ bgmMode: event.target.value as ComposeSettings["bgmMode"] })
+                  }
+                >
+                  <option value="library">音乐库</option>
+                  <option value="upload">上传音频</option>
+                </Select>
               </div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Volume2 className="h-3.5 w-3.5" />
-                音量 {composeSettings.bgmVolume}%
+              <div>
+                <div className="text-xs text-muted-foreground">音频素材</div>
+                {composeSettings.bgmMode === "library" ? (
+                  <Select
+                    className="mt-2 h-8"
+                    value={composeSettings.musicLibraryTrack}
+                    onChange={(event) => onUpdateComposeSettings({ musicLibraryTrack: event.target.value })}
+                  >
+                    <option>温暖创作者节拍</option>
+                    <option>干净产品节奏</option>
+                    <option>柔和纪实铺底</option>
+                  </Select>
+                ) : (
+                  <label className="mt-2 flex h-8 cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 text-xs hover:bg-muted">
+                    <span className="truncate">{composeSettings.bgmFileName || "选择音频文件"}</span>
+                    <Upload className="h-3.5 w-3.5 text-muted-foreground" />
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      className="sr-only"
+                      onChange={(event) =>
+                        onUpdateComposeSettings({ bgmFileName: event.target.files?.[0]?.name ?? "" })
+                      }
+                    />
+                  </label>
+                )}
               </div>
-              <Progress value={composeSettings.bgmVolume} />
-            </button>
+              <div>
+                <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1">
+                    <Volume2 className="h-3.5 w-3.5" />
+                    音量
+                  </span>
+                  <span>{composeSettings.bgmVolume}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={composeSettings.bgmVolume}
+                  onChange={(event) => onUpdateComposeSettings({ bgmVolume: Number(event.target.value) })}
+                  className="w-full accent-teal-700"
+                />
+              </div>
+            </div>
           </TimelineTrack>
 
           <TimelineTrack label="字幕轨" icon={<Captions className="h-4 w-4" />}>
-            <button
+            <div
               onClick={() => onSelectComposeElement({ type: "subtitle" })}
               className={cn(
                 "flex w-full gap-2 overflow-x-auto rounded-lg border p-3 text-left",
@@ -2373,11 +3450,16 @@ function ComposeWorkspace({
               )}
             >
               {orderedScenes.map((scene) => (
-                <span key={scene.id} className="min-w-56 rounded-md border border-border bg-background p-2 text-xs leading-5">
-                  #{scene.index} {scene.narration}
-                </span>
+                <label key={scene.id} className="min-w-72 rounded-md border border-border bg-background p-2 text-xs leading-5">
+                  <span className="mb-1 block font-semibold text-foreground">字幕 #{scene.index}</span>
+                  <textarea
+                    value={scene.narration}
+                    onChange={(event) => onUpdateScene(scene.id, { narration: event.target.value })}
+                    className="min-h-20 w-full resize-none rounded-md border border-border bg-surface px-2 py-1 text-xs leading-5 text-foreground outline-none focus:border-primary/50"
+                  />
+                </label>
               ))}
-            </button>
+            </div>
           </TimelineTrack>
 
           <TimelineTrack label="配音轨" icon={<Mic2 className="h-4 w-4" />}>
@@ -2389,7 +3471,7 @@ function ComposeWorkspace({
               )}
             >
               <div>
-                <div className="text-xs text-muted-foreground">TTS 模型</div>
+                <div className="text-xs text-muted-foreground">配音模型</div>
                 <div className="mt-1 text-sm font-semibold">{composeSettings.ttsModel}</div>
               </div>
               <div>
@@ -2401,58 +3483,11 @@ function ComposeWorkspace({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              onClick={() => onUpdateComposeSettings({ previewPlaying: !composeSettings.previewPlaying })}
-            >
-              <Play className="h-4 w-4 fill-current" />
-              实时预览
-            </Button>
-            <Button onClick={onMergeExport} disabled={localComposeStatus === "merging" || (!allScenesDone && exportStatus !== "ready")}>
-              {exportStatus === "merging" || localComposeStatus === "merging" ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Scissors className="h-4 w-4" />
-              )}
-              {uploadedClipCount ? "合成本地视频" : "一键合成"}
-            </Button>
-            <Button variant="outline" onClick={onGoExport}>
-              <Download className="h-4 w-4" />
-              前往导出
-            </Button>
-          </div>
-
-          <div className="grid gap-2 sm:grid-cols-[150px_auto] sm:items-center">
-            <Select
-              value={composeSettings.exportProfile}
-              onChange={(event) =>
-                onUpdateComposeSettings({ exportProfile: event.target.value as ComposeSettings["exportProfile"] })
-              }
-            >
-              <option>MP4 1080P</option>
-              <option>MP4 720P</option>
-            </Select>
-            <label className="flex h-9 items-center justify-between gap-3 rounded-md border border-border bg-surface px-3 text-sm">
-              <span>水印</span>
-              <input
-                type="checkbox"
-                checked={composeSettings.watermark}
-                onChange={(event) => onUpdateComposeSettings({ watermark: event.target.checked })}
-                className="h-4 w-4 accent-teal-700"
-              />
-            </label>
-          </div>
-        </CardContent>
-      </Card>
-
       {(exportStatus === "merging" || localComposeStatus === "merging") && (
         <Card>
           <CardContent>
             <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
-              <span>{uploadedClipCount ? "浏览器本地视频合成" : "ffmpeg composition task"}</span>
+              <span>{uploadedClipCount ? "浏览器本地视频合成" : "后端合成任务"}</span>
               <span>{uploadedClipCount ? localComposeProgress : exportProgress}%</span>
             </div>
             <Progress value={uploadedClipCount ? localComposeProgress : exportProgress} />
@@ -2531,27 +3566,30 @@ function ExportWorkspace({
             <div className="mt-1 text-xs text-muted-foreground">选择交付规格并生成最终文件</div>
           </div>
           <Badge tone={exportStatus === "ready" ? "green" : exportStatus === "merging" ? "purple" : "neutral"}>
-            {exportStatus === "ready" ? "export ready" : exportStatus}
+            {exportStatusLabel[exportStatus]}
           </Badge>
         </CardHeader>
         <CardContent className="space-y-5">
           <div>
-            <Label htmlFor="export-format-main">Format</Label>
+            <Label htmlFor="export-format-main">导出格式</Label>
             <Select
               id="export-format-main"
               value={exportFormat}
               onChange={(event) => onExportFormatChange(event.target.value)}
               className="mt-2"
             >
+              <option>720p MP4</option>
               <option>1080p MP4</option>
-              <option>4K ProRes</option>
-              <option>9:16 Social Pack</option>
-              <option>1:1 Ad Pack</option>
+              <option>2K MP4</option>
+              <option>4K MP4</option>
+              <option>8K MP4</option>
+              <option>9:16 社媒套装</option>
+              <option>1:1 广告套装</option>
             </Select>
           </div>
           <div>
             <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
-              <span>{localComposeStatus === "merging" ? "本地合成进度" : "Export Progress"}</span>
+              <span>{localComposeStatus === "merging" ? "本地合成进度" : "导出进度"}</span>
               <span>{localComposeStatus === "merging" ? localComposeProgress : exportProgress}%</span>
             </div>
             <Progress value={localComposeStatus === "merging" ? localComposeProgress : exportProgress} />
@@ -2598,9 +3636,9 @@ function ExportWorkspace({
           <div className="grid gap-3 md:grid-cols-2">
             {[
               ["合成视频", localTimelineExport ? `${localTimelineExport.mimeType} · ${formatBytes(localTimelineExport.size)}` : exportFormat],
-              ["Cover Frame", "PNG 1920x1080"],
-              ["Captions", "SRT + VTT"],
-              ["Social Cuts", "9:16 / 1:1"]
+              ["封面帧", "PNG 1920x1080"],
+              ["字幕文件", "SRT + VTT"],
+              ["社媒切片", "9:16 / 1:1"]
             ].map(([label, value]) => (
               <div key={label} className="rounded-lg border border-border bg-background p-4">
                 <div className="text-sm font-semibold">{label}</div>
@@ -2641,7 +3679,8 @@ function PropertyPanel({
   onUploadLocalVideo,
   onRemoveLocalVideo,
   onExportFormatChange,
-  onUpdateSceneModel
+  onUpdateSceneModel,
+  onUpdateScene
 }: {
   activeStep: StudioStep;
   collapsed: boolean;
@@ -2670,6 +3709,10 @@ function PropertyPanel({
   onRemoveLocalVideo: (sceneId: string) => void;
   onExportFormatChange: (value: string) => void;
   onUpdateSceneModel: (sceneId: string, modelId: string) => void;
+  onUpdateScene: (
+    sceneId: string,
+    patch: Partial<Pick<StudioScene, "title" | "prompt" | "narration" | "duration">>
+  ) => void;
 }) {
   const selectedLlmModel = llmModels.find((model) => model.id === llmModelId) ?? llmModels[0];
   const storyboardJson = JSON.stringify(
@@ -2733,7 +3776,7 @@ function PropertyPanel({
               <CardContent className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-md border border-border bg-background p-3">
-                    <div className="text-xs text-muted-foreground">Token 消耗</div>
+                    <div className="text-xs text-muted-foreground">词元消耗</div>
                     <div className="mt-1 text-lg font-semibold">
                       {tokenUsage ? tokenUsage.toLocaleString("zh-CN") : "--"}
                     </div>
@@ -2772,13 +3815,13 @@ function PropertyPanel({
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <Label>Active Scene</Label>
+                  <Label>当前镜头</Label>
                   <div className="mt-2 rounded-md border border-border bg-background p-3 text-sm font-semibold">
                     S{activeScene.index} · {activeScene.title}
                   </div>
                 </div>
                 <div>
-                  <Label>Video Model</Label>
+                  <Label>视频模型</Label>
                   <Select
                     className="mt-2"
                     value={activeScene.modelId}
@@ -2792,17 +3835,19 @@ function PropertyPanel({
                   </Select>
                 </div>
                 <div>
-                  <Label>Prompt</Label>
-                  <p className="mt-2 rounded-md border border-border bg-background p-3 text-sm leading-6 text-muted-foreground">
-                    {activeScene.prompt}
-                  </p>
+                  <Label>提示词</Label>
+                  <Textarea
+                    className="mt-2 min-h-32"
+                    value={activeScene.prompt}
+                    onChange={(event) => onUpdateScene(activeScene.id, { prompt: event.target.value })}
+                  />
                 </div>
                 <div>
-                  <Label>Motion</Label>
+                  <Label>运动幅度</Label>
                   <input className="mt-3 w-full accent-teal-700" type="range" defaultValue={42} />
                 </div>
                 <div>
-                  <Label>Creativity</Label>
+                  <Label>创意强度</Label>
                   <input className="mt-3 w-full accent-violet-600" type="range" defaultValue={68} />
                 </div>
               </CardContent>
@@ -2959,7 +4004,7 @@ function PropertyPanel({
                 {composeSelection.type === "audio" && (
                   <>
                     <div>
-                      <Label>BGM 来源</Label>
+                      <Label>背景音乐来源</Label>
                       <Select
                         className="mt-2"
                         value={composeSettings.bgmMode}
@@ -2968,7 +4013,7 @@ function PropertyPanel({
                         }
                       >
                         <option value="library">音乐库选择</option>
-                        <option value="upload">BGM 上传</option>
+                        <option value="upload">上传背景音乐</option>
                       </Select>
                     </div>
                     {composeSettings.bgmMode === "library" ? (
@@ -2979,14 +4024,14 @@ function PropertyPanel({
                           value={composeSettings.musicLibraryTrack}
                           onChange={(event) => onUpdateComposeSettings({ musicLibraryTrack: event.target.value })}
                         >
-                          <option>Warm Creator Pulse</option>
-                          <option>Clean Product Beat</option>
-                          <option>Soft Documentary Bed</option>
+                          <option>温暖创作者节拍</option>
+                          <option>干净产品节奏</option>
+                          <option>柔和纪实铺底</option>
                         </Select>
                       </div>
                     ) : (
                       <label className="flex cursor-pointer items-center justify-between rounded-md border border-border p-3 text-sm">
-                        <span>{composeSettings.bgmFileName || "选择 BGM 文件"}</span>
+                        <span>{composeSettings.bgmFileName || "选择背景音乐文件"}</span>
                         <Upload className="h-4 w-4 text-muted-foreground" />
                         <input
                           type="file"
@@ -3070,15 +4115,15 @@ function PropertyPanel({
                 {composeSelection.type === "voice" && (
                   <>
                     <div>
-                      <Label>TTS 模型</Label>
+                        <Label>配音模型</Label>
                       <Select
                         className="mt-2"
                         value={composeSettings.ttsModel}
                         onChange={(event) => onUpdateComposeSettings({ ttsModel: event.target.value })}
                       >
-                        <option>Azure TTS</option>
-                        <option>ElevenLabs</option>
-                        <option>Volcengine TTS</option>
+                        <option>Azure 语音合成</option>
+                        <option>ElevenLabs 语音</option>
+                        <option>火山语音合成</option>
                       </Select>
                     </div>
                     <div>
@@ -3088,10 +4133,10 @@ function PropertyPanel({
                         value={composeSettings.ttsVoice}
                         onChange={(event) => onUpdateComposeSettings({ ttsVoice: event.target.value })}
                       >
-                        <option>zh-CN-Xiaoxiao</option>
-                        <option>zh-CN-Yunxi</option>
-                        <option>en-US-Aria</option>
-                        <option>Warm Narrator</option>
+                        <option>中文女声·晓晓</option>
+                        <option>中文男声·云希</option>
+                        <option>英文女声·Aria</option>
+                        <option>温暖旁白</option>
                       </Select>
                     </div>
                   </>
@@ -3107,16 +4152,19 @@ function PropertyPanel({
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <Label>Format</Label>
+                  <Label>导出格式</Label>
                   <Select
                     className="mt-2"
                     value={exportFormat}
                     onChange={(event) => onExportFormatChange(event.target.value)}
                   >
+                    <option>720p MP4</option>
                     <option>1080p MP4</option>
-                    <option>4K ProRes</option>
-                    <option>9:16 Social Pack</option>
-                    <option>1:1 Ad Pack</option>
+                    <option>2K MP4</option>
+                    <option>4K MP4</option>
+                    <option>8K MP4</option>
+                    <option>9:16 社媒套装</option>
+                    <option>1:1 广告套装</option>
                   </Select>
                 </div>
                 <label className="flex items-center justify-between rounded-md border border-border p-3 text-sm">
@@ -3149,14 +4197,16 @@ function PropertyPanel({
                         <div className="text-sm font-semibold">{model.name}</div>
                         <div className="text-xs text-muted-foreground">{model.region}</div>
                       </div>
-                      <Badge tone={model.status === "online" ? "green" : "amber"}>{model.status}</Badge>
+                      <Badge tone={model.status === "online" ? "green" : "amber"}>
+                        {model.status === "online" ? "在线" : model.status === "degraded" ? "降级" : "离线"}
+                      </Badge>
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                      <span className="text-muted-foreground">Quality</span>
+                      <span className="text-muted-foreground">质量</span>
                       <span className="col-span-2 text-right font-semibold">{model.qualityScore}</span>
-                      <span className="text-muted-foreground">Latency</span>
+                      <span className="text-muted-foreground">延迟</span>
                       <span className="col-span-2 text-right font-semibold">{metricFormat(model.latencyMs, "ms")}</span>
-                      <span className="text-muted-foreground">Cost</span>
+                      <span className="text-muted-foreground">成本</span>
                       <span className="col-span-2 text-right font-semibold">${model.costPerMinute}/min</span>
                     </div>
                   </div>

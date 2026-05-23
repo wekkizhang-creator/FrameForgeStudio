@@ -11,7 +11,7 @@ export const videoModels: ModelProvider[] = [
     latencyMs: 10800,
     costPerMinute: 1.9,
     qualityScore: 93,
-    region: "CN-North",
+    region: "华北",
     concurrency: 18,
     quotaUsed: 61,
     enabled: true
@@ -26,7 +26,7 @@ export const videoModels: ModelProvider[] = [
     latencyMs: 9200,
     costPerMinute: 1.6,
     qualityScore: 90,
-    region: "CN-East",
+    region: "华东",
     concurrency: 24,
     quotaUsed: 43,
     enabled: true
@@ -41,7 +41,7 @@ export const videoModels: ModelProvider[] = [
     latencyMs: 14100,
     costPerMinute: 2.2,
     qualityScore: 91,
-    region: "CN-South",
+    region: "华南",
     concurrency: 14,
     quotaUsed: 55,
     enabled: true
@@ -54,42 +54,42 @@ export const llmModels: LlmModelConfig[] = [
     name: "GPT-4.1 Mini",
     version: "2026-04-routing",
     estimatedTokens: 2400,
-    provider: "OpenAI Gateway"
+    provider: "OpenAI 网关"
   },
   {
     id: "gpt-5.4",
     name: "GPT-5.4",
     version: "2026-05-production",
     estimatedTokens: 3600,
-    provider: "OpenAI Gateway"
+    provider: "OpenAI 网关"
   },
   {
     id: "claude-creative",
-    name: "Claude Creative Router",
+    name: "Claude 创意路由",
     version: "ops-2026.05",
     estimatedTokens: 3200,
-    provider: "Anthropic Gateway"
+    provider: "Anthropic 网关"
   },
   {
     id: "qwen-video-copy",
-    name: "Qwen Video Copy",
+    name: "通义视频文案",
     version: "cn-2026.05",
     estimatedTokens: 2800,
-    provider: "CN Model Pool"
+    provider: "国内模型池"
   }
 ];
 
 export const platformModels: ModelProvider[] = [
   {
     id: "script-llm",
-    name: "Script LLM",
-    vendor: "Internal Gateway",
+    name: "脚本大模型",
+    vendor: "内部网关",
     capability: "script",
     status: "online",
     latencyMs: 1800,
     costPerMinute: 0.18,
     qualityScore: 92,
-    region: "Global",
+    region: "全球",
     concurrency: 220,
     quotaUsed: 38,
     enabled: true
@@ -97,28 +97,28 @@ export const platformModels: ModelProvider[] = [
   ...videoModels,
   {
     id: "merge-renderer",
-    name: "Merge Renderer",
-    vendor: "Internal Media Service",
+    name: "合成渲染器",
+    vendor: "内部媒体服务",
     capability: "merge",
     status: "online",
     latencyMs: 3200,
     costPerMinute: 0.24,
     qualityScore: 96,
-    region: "Global",
+    region: "全球",
     concurrency: 80,
     quotaUsed: 47,
     enabled: true
   },
   {
     id: "safety-check",
-    name: "Safety Review",
-    vendor: "Policy Engine",
+    name: "安全审核",
+    vendor: "策略引擎",
     capability: "safety",
     status: "online",
     latencyMs: 900,
     costPerMinute: 0.05,
     qualityScore: 89,
-    region: "Global",
+    region: "全球",
     concurrency: 300,
     quotaUsed: 29,
     enabled: true
@@ -266,33 +266,33 @@ export const credentials: ApiCredential[] = [
   {
     id: "cred-seedance",
     provider: "Seedance",
-    label: "Production Gateway",
+    label: "生产网关",
     status: "valid",
-    lastChecked: "2 min ago",
-    owner: "Platform"
+    lastChecked: "2 分钟前",
+    owner: "平台团队"
   },
   {
     id: "cred-hailuo",
     provider: "Hailuo",
-    label: "Creator Pool",
+    label: "创作者资源池",
     status: "valid",
-    lastChecked: "4 min ago",
-    owner: "Growth"
+    lastChecked: "4 分钟前",
+    owner: "增长团队"
   },
   {
     id: "cred-kling",
     provider: "Kling",
-    label: "CN Region",
+    label: "国内区域",
     status: "expiring",
-    lastChecked: "18 min ago",
-    owner: "CN Ops"
+    lastChecked: "18 分钟前",
+    owner: "国内运营"
   }
 ];
 
 export const queueTasks: QueueTask[] = [
   {
     id: "task_8z24",
-    workspace: "Studio / Fashion Launch",
+    workspace: "工作台 / 时尚发布",
     phase: "rendering",
     route: "品牌质感",
     status: "running",
@@ -301,7 +301,7 @@ export const queueTasks: QueueTask[] = [
   },
   {
     id: "task_8z25",
-    workspace: "Studio / App Explainer",
+    workspace: "工作台 / 应用讲解",
     phase: "storyboard",
     route: "短视频增长",
     status: "waiting",
@@ -310,7 +310,7 @@ export const queueTasks: QueueTask[] = [
   },
   {
     id: "task_8z26",
-    workspace: "Team / Commerce Batch",
+    workspace: "团队 / 电商批量",
     phase: "rendering",
     route: "中文电商",
     status: "retrying",
@@ -319,7 +319,7 @@ export const queueTasks: QueueTask[] = [
   },
   {
     id: "task_8z27",
-    workspace: "Agency / Variant Set",
+    workspace: "代理商 / 变体集合",
     phase: "export",
     route: "成本优先",
     status: "done",

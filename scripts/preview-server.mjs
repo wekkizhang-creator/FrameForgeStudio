@@ -5,6 +5,7 @@ import path from "node:path";
 const root = path.resolve(process.cwd(), "out");
 const preferredPort = Number(process.env.PORT || 4173);
 const host = "127.0.0.1";
+const composeApiOrigin = process.env.COMPOSE_API_ORIGIN || "http://127.0.0.1:4174";
 
 const mimeTypes = new Map([
   [".html", "text/html; charset=utf-8"],
@@ -39,8 +40,47 @@ function resolveRoute(url) {
   return target;
 }
 
+function proxyApiRequest(req, res) {
+  const target = new URL(req.url || "/", composeApiOrigin);
+  const headers = {
+    ...req.headers,
+    host: target.host
+  };
+
+  const proxy = http.request(
+    {
+      protocol: target.protocol,
+      hostname: target.hostname,
+      port: target.port,
+      path: `${target.pathname}${target.search}`,
+      method: req.method,
+      headers
+    },
+    (apiRes) => {
+      res.writeHead(apiRes.statusCode ?? 502, apiRes.headers);
+      apiRes.pipe(res);
+    }
+  );
+
+  proxy.on("error", (error) => {
+    res.writeHead(502, { "content-type": "application/json; charset=utf-8" });
+    res.end(
+      JSON.stringify({
+        error: `Compose API unavailable at ${composeApiOrigin}: ${error.message}`
+      })
+    );
+  });
+
+  req.pipe(proxy);
+}
+
 const server = http.createServer(async (req, res) => {
   try {
+    if (req.url?.startsWith("/api/")) {
+      proxyApiRequest(req, res);
+      return;
+    }
+
     const target = resolveRoute(req.url);
     if (!target) {
       res.writeHead(403, { "content-type": "text/plain; charset=utf-8" });

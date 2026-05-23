@@ -6,12 +6,12 @@ type ButtonSize = "sm" | "md" | "icon";
 
 const variants: Record<ButtonVariant, string> = {
   default:
-    "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 disabled:bg-primary/55",
+    "bg-brand-gradient text-primary-foreground shadow-glow-sm hover:opacity-92 disabled:opacity-50",
   secondary:
-    "bg-foreground text-white shadow-sm hover:bg-foreground/88 disabled:bg-foreground/50",
+    "border border-border/80 bg-elevated text-foreground shadow-sm hover:border-primary/35 hover:bg-muted disabled:opacity-50",
   outline:
-    "border border-border bg-surface text-foreground hover:bg-muted disabled:bg-surface",
-  ghost: "text-foreground hover:bg-muted disabled:hover:bg-transparent",
+    "border border-border/80 bg-transparent text-foreground hover:border-primary/40 hover:bg-muted/60 disabled:opacity-50",
+  ghost: "text-foreground hover:bg-muted/70 disabled:hover:bg-transparent",
   danger:
     "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 disabled:bg-destructive/55"
 };

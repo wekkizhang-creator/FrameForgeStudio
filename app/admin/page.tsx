@@ -107,10 +107,10 @@ const navItems: Array<{
   icon: LucideIcon;
 }> = [
   { id: "overview", label: "运营总览", description: "健康度与事件", icon: Gauge },
-  { id: "api", label: "API 接入", description: "凭证与回调", icon: KeyRound },
+  { id: "api", label: "接口接入", description: "凭证与回调", icon: KeyRound },
   { id: "routes", label: "模型路由", description: "策略与供应商", icon: Router },
   { id: "queue", label: "任务队列", description: "异步任务", icon: Workflow },
-  { id: "schema", label: "参数 Schema", description: "动态参数", icon: Braces },
+  { id: "schema", label: "参数结构", description: "动态参数", icon: Braces },
   { id: "billing", label: "计费规则", description: "套餐与水印", icon: WalletCards },
   { id: "safety", label: "安全审核", description: "风控与复核", icon: ShieldCheck }
 ];
@@ -196,7 +196,7 @@ const providerLabel: Record<string, string> = {
   seedance: "Seedance 字节",
   hailuo: "Hailuo 海螺",
   kling: "Kling 可灵",
-  "script-llm": "脚本 LLM",
+  "script-llm": "脚本大模型",
   "merge-renderer": "视频合成器",
   "safety-check": "安全审核"
 };
@@ -205,7 +205,10 @@ const credentialLabelMap: Record<string, string> = {
   "Production Gateway": "生产网关",
   "Creator Pool": "创作者池",
   "CN Region": "中国区",
-  "New Gateway": "新网关"
+  "New Gateway": "新网关",
+  "生产网关": "生产网关",
+  "创作者资源池": "创作者资源池",
+  "国内区域": "国内区域"
 };
 
 const ownerLabelMap: Record<string, string> = {
@@ -214,7 +217,10 @@ const ownerLabelMap: Record<string, string> = {
   Sales: "销售团队",
   Lifecycle: "生命周期团队",
   "CN Ops": "国内运营",
-  Ops: "运营团队"
+  Ops: "运营团队",
+  平台团队: "平台团队",
+  增长团队: "增长团队",
+  国内运营: "国内运营"
 };
 
 const initialBillingRules: BillingRule[] = [
@@ -353,7 +359,7 @@ export default function AdminPage() {
   const [safetyRules, setSafetyRules] = useState<SafetyRule[]>(initialSafetyRules);
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>(initialReviewItems);
   const [blockedTerms, setBlockedTerms] = useState(
-    "deepfake without consent\nmedical cure guarantee\ninvestment return promise"
+    "未授权深度伪造\n医疗治愈保证\n投资收益承诺"
   );
   const [routeSimulator, setRouteSimulator] = useState<RouteSimulator>({
     intent: "30 秒新品发布短片",
@@ -363,21 +369,21 @@ export default function AdminPage() {
   const [events, setEvents] = useState<AdminEvent[]>([
     {
       id: "event-route",
-      message: "route.policy.updated: policy-brand-film published",
+      message: "路由策略已更新：品牌质感策略已发布",
       tone: "green",
-      time: "2 min ago"
+      time: "2 分钟前"
     },
     {
       id: "event-provider",
-      message: "provider.kling.retrying: fallback rate 14%",
+      message: "供应商可灵重试中：回退率 14%",
       tone: "amber",
-      time: "8 min ago"
+      time: "8 分钟前"
     },
     {
       id: "event-export",
-      message: "worker.export.completed: task_8z27 delivered",
+      message: "导出任务已完成：task_8z27 已交付",
       tone: "purple",
-      time: "14 min ago"
+      time: "14 分钟前"
     }
   ]);
 
@@ -455,7 +461,7 @@ export default function AdminPage() {
 
   const handleSyncRoutes = () => {
     syncRoutes();
-    pushEvent("routes.synced: policies, schemas and credentials published", "green");
+    pushEvent("路由已同步：策略、参数与凭证已发布", "green");
   };
 
   const updateCredential = (id: string, patch: Partial<ApiCredential>) => {
@@ -473,7 +479,7 @@ export default function AdminPage() {
     };
     setApiCredentials((items) => [credential, ...items]);
     setSelectedCredentialId(credential.id);
-    pushEvent("credential.created: custom provider", "purple");
+    pushEvent("凭证已创建：自定义供应商", "purple");
   };
 
   const removeCredential = (id: string) => {
@@ -484,22 +490,22 @@ export default function AdminPage() {
       }
       return apiCredentials.find((item) => item.id !== id)?.id ?? "";
     });
-    pushEvent(`credential.deleted: ${id}`, "red");
+    pushEvent(`凭证已删除：${id}`, "red");
   };
 
   const testCredential = (id: string) => {
     const credential = apiCredentials.find((item) => item.id === id);
     updateCredential(id, {
       status: credentialSecret.trim().length > 0 || credential?.status !== "missing" ? "valid" : "missing",
-      lastChecked: "just now"
+      lastChecked: "刚刚"
     });
-    pushEvent(`credential.checked: ${credential?.provider ?? id}`, "green");
+    pushEvent(`凭证已检查：${credential?.provider ?? id}`, "green");
   };
 
   const rotateCredential = (id: string) => {
-    updateCredential(id, { status: "valid", lastChecked: "rotated now" });
+    updateCredential(id, { status: "valid", lastChecked: "刚刚轮换" });
     setCredentialSecret("");
-    pushEvent(`credential.rotated: ${id}`, "purple");
+    pushEvent(`凭证已轮换：${id}`, "purple");
   };
 
   const updateTaskStatus = (id: string, status: QueueStatus) => {
@@ -515,7 +521,7 @@ export default function AdminPage() {
           : task
       )
     );
-    pushEvent(`queue.${status}: ${id}`, status === "cancelled" ? "red" : "green");
+    pushEvent(`队列状态更新：${queueStatusLabel[status]} · ${id}`, status === "cancelled" ? "red" : "green");
   };
 
   const advanceQueue = () => {
@@ -533,12 +539,12 @@ export default function AdminPage() {
         };
       })
     );
-    pushEvent("queue.websocket.tick: progress updated", "purple");
+    pushEvent("队列进度已刷新：实时事件已同步", "purple");
   };
 
   const clearDoneTasks = () => {
     setTaskList((items) => items.filter((task) => task.status !== "done" && task.status !== "cancelled"));
-    pushEvent("queue.cleaned: completed and cancelled tasks archived", "amber");
+    pushEvent("队列已清理：已完成与已取消任务已归档", "amber");
   };
 
   const updateBillingRule = (id: string, patch: Partial<BillingRule>) => {
@@ -558,7 +564,7 @@ export default function AdminPage() {
     };
     setBillingRules((items) => [rule, ...items]);
     setSelectedBillingId(rule.id);
-    pushEvent("billing.plan.created: 新套餐", "purple");
+    pushEvent("计费套餐已创建：新套餐", "purple");
   };
 
   const updateSafetyRule = (id: string, patch: Partial<SafetyRule>) => {
@@ -567,7 +573,7 @@ export default function AdminPage() {
 
   const reviewDecision = (id: string, status: ReviewItem["status"]) => {
     setReviewItems((items) => items.map((item) => (item.id === id ? { ...item, status } : item)));
-    pushEvent(`safety.review.${status}: ${id}`, status === "blocked" ? "red" : "green");
+    pushEvent(`安全复核已处理：${reviewStatusLabel[status]} · ${id}`, status === "blocked" ? "red" : "green");
   };
 
   const addReviewItem = () => {
@@ -579,7 +585,7 @@ export default function AdminPage() {
       status: "pending"
     };
     setReviewItems((items) => [item, ...items]);
-    pushEvent("safety.review.created: manual sample", "purple");
+    pushEvent("安全复核已创建：人工抽检样本", "purple");
   };
 
   return (
@@ -591,8 +597,8 @@ export default function AdminPage() {
               <CloudCog className="h-4 w-4" />
             </div>
             <div>
-              <div className="text-sm font-semibold">FrameForge 管理后台</div>
-              <div className="text-xs text-muted-foreground">API 接入、模型路由与运营控制</div>
+              <div className="text-sm font-semibold">光影造物管理后台</div>
+              <div className="text-xs text-muted-foreground">接口接入、模型路由与运营控制</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -622,7 +628,7 @@ export default function AdminPage() {
                 <Badge tone="green">生产</Badge>
               </div>
               <div className="mt-2 text-sm font-semibold">创作者平台运营</div>
-              <div className="mt-1 text-xs text-muted-foreground">REST API + WebSocket 任务</div>
+              <div className="mt-1 text-xs text-muted-foreground">接口服务 + 实时任务</div>
             </div>
 
             <nav className="mt-6 space-y-1">
@@ -968,7 +974,7 @@ function OverviewSection({
                 size="sm"
                 onClick={() => {
                   toggleProvider(selectedProvider.id);
-                  pushEvent(`provider.toggled: ${selectedProvider.id}`, "amber");
+    pushEvent(`供应商启停已切换：${selectedProvider.id}`, "amber");
                 }}
               >
                 {selectedProvider.enabled ? <ToggleRight className="h-4 w-4 text-primary" /> : <ToggleLeft className="h-4 w-4" />}
@@ -1026,7 +1032,7 @@ function OverviewSection({
         <Card>
           <CardHeader>
             <CardTitle>实时运营事件</CardTitle>
-            <div className="mt-1 text-xs text-muted-foreground">模拟 WebSocket 事件流，关键动作会写入这里。</div>
+              <div className="mt-1 text-xs text-muted-foreground">模拟实时事件流，关键动作会写入这里。</div>
           </CardHeader>
           <CardContent className="space-y-3">
             {events.map((event) => (
@@ -1047,7 +1053,7 @@ function OverviewSection({
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
             <MetricPanel label="启用路由" value={enabledPolicies} detail="正在生效的策略" />
-            <MetricPanel label="排队任务" value={taskList.filter((task) => task.status === "waiting").length} detail="等待 Worker 执行" />
+            <MetricPanel label="排队任务" value={taskList.filter((task) => task.status === "waiting").length} detail="等待工作进程执行" />
             <MetricPanel label="重试率" value="4.8%" detail="最近 24 小时" />
           </CardContent>
         </Card>
@@ -1096,7 +1102,7 @@ function ApiAccessSection({
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-3">
           <div>
-            <CardTitle>API 凭证池</CardTitle>
+            <CardTitle>接口凭证池</CardTitle>
             <div className="mt-1 text-xs text-muted-foreground">管理厂商密钥状态、负责人和健康检查。</div>
           </div>
           <Button size="sm" variant="outline" onClick={addCredential}>
@@ -1187,12 +1193,12 @@ function ApiAccessSection({
                 <div>
                   <Label>密钥模式</Label>
                   <Select className="mt-2" value={credentialMode} onChange={(event) => setCredentialMode(event.target.value as "vault" | "plain")}>
-                    <option value="vault">Vault 引用</option>
+                    <option value="vault">密钥库引用</option>
                     <option value="plain">明文密钥</option>
                   </Select>
                 </div>
                 <div>
-                  <Label>密钥 / Vault 引用</Label>
+                  <Label>密钥 / 密钥库引用</Label>
                   <Input
                     className="mt-2"
                     type="password"
@@ -1204,7 +1210,7 @@ function ApiAccessSection({
               </div>
 
               <div>
-                <Label>Webhook 回调地址</Label>
+                <Label>回调地址</Label>
                 <Input className="mt-2" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} />
               </div>
 
@@ -1214,7 +1220,7 @@ function ApiAccessSection({
                   健康探测
                 </div>
                 <div className="mt-3 grid gap-3 md:grid-cols-3">
-                  <MetricPanel label="超时" value="30s" detail="REST 请求" />
+                  <MetricPanel label="超时" value="30s" detail="接口请求" />
                   <MetricPanel label="回调状态" value="200" detail="最近一次模拟探测" />
                   <MetricPanel label="速率限制" value="860/min" detail="租户池" />
                 </div>
@@ -1241,7 +1247,7 @@ function ApiAccessSection({
             </div>
           ) : (
             <div className="rounded-lg border border-border bg-background p-6 text-sm text-muted-foreground">
-              暂无凭证，请新增一个 API 接入。
+              暂无凭证，请新增一个接口接入。
             </div>
           )}
         </CardContent>
@@ -1334,7 +1340,7 @@ function RoutesSection({
               variant="outline"
               onClick={() => {
                 togglePolicy(selectedPolicy.id);
-                pushEvent(`route.policy.toggled: ${selectedPolicy.id}`, "amber");
+                pushEvent(`路由策略启停已切换：${selectedPolicy.id}`, "amber");
               }}
             >
               {selectedPolicy.enabled ? <ToggleRight className="h-4 w-4 text-primary" /> : <ToggleLeft className="h-4 w-4" />}
@@ -1413,7 +1419,7 @@ function RoutesSection({
                 onChange={(event) => updatePolicy(selectedPolicy.id, { qualityWeight: numberValue(event.target.value) })}
               />
             </div>
-            <Button onClick={() => pushEvent(`route.policy.saved: ${selectedPolicy.id}`, "green")}>
+            <Button onClick={() => pushEvent(`路由策略已保存：${selectedPolicy.id}`, "green")}>
               <Save className="h-4 w-4" />
               保存路由策略
             </Button>
@@ -1444,7 +1450,7 @@ function RoutesSection({
                 >
                   <option value="抖音">抖音</option>
                   <option value="小红书">小红书</option>
-                  <option value="YouTube Shorts">YouTube Shorts</option>
+                  <option value="海外短视频">海外短视频</option>
                   <option value="视频号">视频号</option>
                 </Select>
               </div>
@@ -1470,12 +1476,12 @@ function RoutesSection({
                 <pre className="mt-3 overflow-auto text-xs leading-5 text-white/85">
 {JSON.stringify(
   {
-    intent: routeSimulator.intent,
-    platform: routeSimulator.platform,
-    policy_id: routeResult.policy.id,
-    primary_model: routeResult.primary,
-    fallback_model: routeResult.fallback,
-    max_cost_per_min: routeSimulator.maxCost
+    意图: routeSimulator.intent,
+    平台: routeSimulator.platform,
+    策略ID: routeResult.policy.id,
+    主模型: routeResult.primary,
+    备用模型: routeResult.fallback,
+    每分钟最高成本: routeSimulator.maxCost
   },
   null,
   2
@@ -1490,7 +1496,7 @@ function RoutesSection({
           <CardHeader className="flex flex-row items-center justify-between gap-3">
             <div>
               <CardTitle>供应商路由开关</CardTitle>
-              <div className="mt-1 text-xs text-muted-foreground">模型不可用时路由会自动转入 fallback。</div>
+              <div className="mt-1 text-xs text-muted-foreground">模型不可用时路由会自动转入备用模型。</div>
             </div>
             <Select className="w-44" value={selectedProviderId} onChange={(event) => selectProvider(event.target.value)}>
               {videoModels.map((model) => (
@@ -1512,7 +1518,7 @@ function RoutesSection({
                 variant="outline"
                 onClick={() => {
                   toggleProvider(selectedProvider.id);
-                  pushEvent(`provider.route.toggle: ${selectedProvider.id}`, "amber");
+                  pushEvent(`供应商路由已切换：${selectedProvider.id}`, "amber");
                 }}
               >
                 {selectedProvider.enabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
@@ -1568,7 +1574,7 @@ function TaskQueueSection({
   const createTask = () => {
     const task: AdminQueueTask = {
       id: `task_${Date.now().toString().slice(-5)}`,
-      workspace: "Studio / 手动派发",
+      workspace: "工作台 / 手动派发",
       phase: "rendering",
       route: "运营手动路由",
       status: "waiting",
@@ -1576,7 +1582,7 @@ function TaskQueueSection({
       eta: "04:00"
     };
     setTaskList((items) => [task, ...items]);
-    pushEvent(`queue.created: ${task.id}`, "purple");
+    pushEvent(`队列任务已创建：${task.id}`, "purple");
   };
 
   return (
@@ -1586,7 +1592,7 @@ function TaskQueueSection({
           <CardTitle>任务队列</CardTitle>
           <div className="mt-1 text-xs text-muted-foreground">异步脚本、分镜、视频生成和导出任务。</div>
         </div>
-        <Badge tone="purple">WebSocket 实时</Badge>
+        <Badge tone="purple">实时同步</Badge>
       </CardHeader>
       <CardContent>
         <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_180px_auto_auto_auto]">
@@ -1673,7 +1679,7 @@ function TaskQueueSection({
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-4">
-          <MetricPanel label="运行中" value={taskList.filter((task) => task.status === "running").length} detail="Worker 占用" />
+          <MetricPanel label="运行中" value={taskList.filter((task) => task.status === "running").length} detail="工作进程占用" />
           <MetricPanel label="重试中" value={taskList.filter((task) => task.status === "retrying").length} detail="已启用回退" />
           <MetricPanel label="等待中" value={taskList.filter((task) => task.status === "waiting").length} detail="等待派发" />
           <MetricPanel label="已完成" value={taskList.filter((task) => task.status === "done").length} detail="可交付" />
@@ -1714,12 +1720,12 @@ function SchemaSection({
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-3">
         <div>
-          <CardTitle>参数 Schema 中心</CardTitle>
+          <CardTitle>参数结构中心</CardTitle>
           <div className="mt-1 text-xs text-muted-foreground">
-            JSON Schema Draft-07 + ui:* 扩展，驱动 Studio 参数表单与厂商 API 字段映射。
+            JSON 结构草案 + 界面扩展，驱动工作台参数表单与厂商接口字段映射。
           </div>
         </div>
-        <Badge tone={selectedSchemaError ? "red" : "green"}>{selectedSchemaError ? "Schema 异常" : "已发布到 Studio"}</Badge>
+        <Badge tone={selectedSchemaError ? "red" : "green"}>{selectedSchemaError ? "结构异常" : "已发布到工作台"}</Badge>
       </CardHeader>
       <CardContent>
         <div className="mb-4 flex flex-wrap gap-2">
@@ -1746,7 +1752,7 @@ function SchemaSection({
               <div>
                 <div className="text-sm font-semibold">{selectedSchema.title}</div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  运营修改 Schema 后，用户端无需改代码即可刷新参数表单。
+                  运营修改参数结构后，用户端无需改代码即可刷新参数表单。
                 </div>
               </div>
               <div className="flex gap-2">
@@ -1759,7 +1765,7 @@ function SchemaSection({
                   variant="outline"
                   onClick={() => {
                     resetSchema(selectedSchemaModelId);
-                    pushEvent(`schema.reset: ${selectedSchemaModelId}`, "amber");
+                    pushEvent(`参数结构已重置：${selectedSchemaModelId}`, "amber");
                   }}
                 >
                   <RefreshCcw className="h-3.5 w-3.5" />
@@ -1778,7 +1784,7 @@ function SchemaSection({
                 selectedSchemaError ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"
               )}
             >
-              {selectedSchemaError ?? "Schema 已通过 Draft-07 校验，并同步给 Studio 动态渲染器。"}
+              {selectedSchemaError ?? "参数结构已通过校验，并同步给工作台动态渲染器。"}
             </div>
           </div>
 
@@ -1828,11 +1834,11 @@ function SchemaSection({
               <pre className="mt-3 overflow-auto text-xs leading-5 text-white/86">
 {JSON.stringify(
   {
-    model_id: selectedSchemaModelId,
-    endpoint: selectedSchema["ui:api"]?.endpoint,
-    prompt_field: selectedSchema["ui:api"]?.promptField,
-    params: "{{ schema_form_values }}",
-    transform: "properties[*].ui:apiField -> vendor body"
+    模型ID: selectedSchemaModelId,
+    接口地址: selectedSchema["ui:api"]?.endpoint,
+    提示词字段: selectedSchema["ui:api"]?.promptField,
+    参数: "{{ 表单参数值 }}",
+    转换规则: "参数字段 -> 厂商请求体"
   },
   null,
   2
@@ -1842,10 +1848,10 @@ function SchemaSection({
                 className="mt-3"
                 variant="outline"
                 size="sm"
-                onClick={() => pushEvent(`schema.published: ${selectedSchemaModelId}`, "green")}
+                onClick={() => pushEvent(`参数结构已发布：${selectedSchemaModelId}`, "green")}
               >
                 <Save className="h-3.5 w-3.5" />
-                发布到 Studio
+                发布到工作台
               </Button>
             </div>
           </div>
@@ -1999,7 +2005,7 @@ function BillingSection({
             <MetricPanel label="导出闸口" value={selectedBillingRule.watermarkLocked ? "带水印" : "无水印"} detail="付费控制点" />
             <MetricPanel label="超额策略" value={overageActionLabel[selectedBillingRule.overageAction]} detail="预算超限时" />
           </div>
-          <Button onClick={() => pushEvent(`billing.saved: ${selectedBillingRule.id}`, "green")}>
+          <Button onClick={() => pushEvent(`计费规则已保存：${selectedBillingRule.id}`, "green")}>
             <Save className="h-4 w-4" />
             保存计费规则
           </Button>
@@ -2065,7 +2071,7 @@ function SafetySection({
             <Label>阻断词库</Label>
             <Textarea className="mt-2 min-h-32 font-mono text-xs" value={blockedTerms} onChange={(event) => setBlockedTerms(event.target.value)} />
           </div>
-          <Button onClick={() => pushEvent("safety.rules.published: moderation config updated", "green")}>
+          <Button onClick={() => pushEvent("安全规则已发布：审核配置已更新", "green")}>
             <ShieldCheck className="h-4 w-4" />
             发布安全策略
           </Button>
@@ -2113,7 +2119,7 @@ function SafetySection({
             </div>
           ))}
           <div className="rounded-md border border-border bg-surface p-3 text-xs leading-5 text-muted-foreground">
-            复核结果会触发 safety.review 事件，并在真实部署中更新 Worker 准入闸口。
+            复核结果会触发安全复核事件，并在真实部署中更新工作进程准入闸口。
           </div>
         </CardContent>
       </Card>
